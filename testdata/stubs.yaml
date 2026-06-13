@@ -1,0 +1,55 @@
+# Example stubs file for gmock — YAML format
+# Run: gmock start --port 8080 --stubs ./testdata/stubs.yaml
+
+mappings:
+  - name: list-users
+    request:
+      method: GET
+      urlPath: /api/users
+    response:
+      status: 200
+      headers:
+        Content-Type: application/json
+      body: '{"users":[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]}'
+
+  - name: get-user-by-id
+    request:
+      method: GET
+      urlPathRegex: ^/api/users/\d+$
+    response:
+      status: 200
+      headers:
+        Content-Type: application/json
+      body: '{"id":1,"name":"Alice"}'
+
+  - name: create-user
+    request:
+      method: POST
+      urlPath: /api/users
+      headers:
+        Content-Type: application/json
+    response:
+      status: 201
+      headers:
+        Content-Type: application/json
+        Location: /api/users/3
+      body: '{"id":3,"name":"Charlie"}'
+
+  - name: server-error
+    request:
+      method: GET
+      urlPath: /api/error
+    response:
+      status: 500
+      body: '{"error":"internal server error"}'
+
+  - name: slow-endpoint
+    request:
+      method: GET
+      urlPath: /api/slow
+    response:
+      status: 200
+      body: '{"slow":true}'
+      delay:
+        type: fixed
+        value: 1000  # 1 second delay (implemented in Slice 7)

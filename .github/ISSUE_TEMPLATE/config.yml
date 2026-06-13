@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: gmock Questions & Discussions
+    url: https://github.com/sunny809/gochaos/discussions
+    about: Please use the issue templates, or use Discussions for questions.

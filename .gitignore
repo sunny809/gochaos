@@ -1,0 +1,23 @@
+# Binaries
+gmock
+/gmock
+*.exe
+*.test
+
+# Coverage / profiles
+coverage.out
+coverage.html
+*.prof
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Project-specific AI instructions (not for public repo)
+CLAUDE.md
+
+# Claude Code session data
+.claude/
