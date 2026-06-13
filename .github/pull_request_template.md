@@ -15,5 +15,5 @@ Fixes # (issue)
 ## Checklist
 
 - [ ] Tests pass (`go test -race ./...`)
-- [ ] Documentation updated (README, ARCHITECTURE.md, or ADRs if applicable)
+- [ ] Documentation updated (README if applicable)
 - [ ] CHANGELOG.md updated (if this is a user-visible change)

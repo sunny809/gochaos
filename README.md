@@ -1,6 +1,6 @@
 # gochaos
 
-> A Go-native HTTP mock server — embeddable in tests, runnable as a CLI
+> A Go-native HTTP mock server with built-in chaos engineering — embeddable in Go tests, runnable as a standalone CLI for CI/CD integration testing, resilience testing, and API mocking.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/sunny809/gochaos.svg)](https://pkg.go.dev/github.com/sunny809/gochaos)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sunny809/gochaos)](https://goreportcard.com/report/github.com/sunny809/gochaos)
@@ -10,37 +10,7 @@
 [![Release](https://img.shields.io/github/release/sunny809/gochaos.svg)](https://github.com/sunny809/gochaos/releases/latest)
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go)](https://golang.org/doc/devel/release.html)
 
-`gochaos` is a lightweight HTTP/REST mock server inspired by [WireMock](https://wiremock.org/), built natively in Go. It fills a gap in the Go ecosystem: existing solutions like `gock` and `httpmock` only intercept at the `http.RoundTripper` level — they're not real servers, have no admin API, no dynamic responses. `gochaos` is both an **embeddable library** for Go tests and a **standalone CLI binary** for CI pipelines and non-Go teams.
-
-## Table of Contents
-
-- [Design Goals](#design-goals)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-  - [As a CLI](#as-a-cli)
-  - [As a Go Library](#as-a-go-library)
-- [Stub File Format](#stub-file-format)
-- [Request Matching](#request-matching)
-- [Response Features](#response-features)
-  - [Response Delays](#response-delays)
-  - [Binary Responses (Base64)](#binary-responses-base64)
-  - [Redirect Responses](#redirect-responses)
-  - [CORS Support](#cors-support)
-  - [Gzip Compression](#gzip-compression)
-- [Admin API](#admin-api)
-- [Roadmap](#roadmap)
-- [Project Layout](#project-layout)
-- [Building & Testing](#building--testing)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Design Goals
-
-- **Easy to configure** — Fluent Go API + YAML/JSON stub files + (planned) hot-reload
-- **Easy to manage** — Full RESTful Admin API for runtime stub control
-- **Easy to troubleshoot** — Request log + (planned) near-miss diagnostics explaining *why* a stub didn't match
-- **Minimal dependencies** — Core library uses only the Go stdlib + a small JSONPath package
-- **Production-ready open-source standards** — Apache 2.0, race-tested, structured logging
+`gochaos` is a lightweight HTTP/REST mock server inspired by [WireMock](https://wiremock.org/), built natively in Go. Unlike `gock` and `httpmock` which only intercept at the `http.RoundTripper` level, gochaos runs as a **real HTTP server** with a **REST admin API**, **response templating**, **request verification**, and **fault injection** — both as an embeddable Go library and a standalone CLI for any language team.
 
 ## Installation
 
@@ -270,60 +240,19 @@ server := gmock.NewServer(gmock.WithGzip(false))
 | `DELETE` | `/__admin/requests` | Clear request log |
 | `GET` | `/__admin/health` | Health check |
 
-## Roadmap
+## Features
 
-Built incrementally as "build slices" for fast feedback. **Currently shipped:**
-
-- Core stub registry with concurrent-safe CRUD
-- Request matching (method, path, header, query, body — exact/regex/JSONPath)
-- Cookie matching
-- Content negotiation (Accept header)
-- HTTP server with handler pipeline
-- Admin REST API
-- Request logging (ring buffer)
-- Verification API
-- CLI binary (start, stub, reset, requests)
-- YAML/JSON stub file loading
-- Priority-ordered matching
-- Response delay injection (fixed & random)
+- Concurrent-safe stub registry with priority-ordered matching
+- 8-dimensional request matching (method, path, headers, query, body, cookies, accept)
+- Response templating with `text/template` (`{{.Request.Method}}`, `{{randomUUID}}`, `{{randomInt}}`, `{{now}}`)
+- Fixed and random response delay injection
 - Binary response body (base64)
 - Redirect response helper
-- CORS support (preflight + headers)
+- CORS support (preflight + actual requests)
 - Gzip response compression
-
-**Planned:**
-
-- Fault injection (connection resets, malformed responses)
-- Proxy recording mode
-- Stateful scenarios
-- Near-miss diagnostics
-- Hot-reload of stub files
-- Web UI dashboard
-
-## Project Layout
-
-```
-gmock/
-├── cmd/gmock/           # CLI entry point (cobra)
-├── pkg/gmock/           # Public library API
-├── internal/
-│   ├── spec/            # Canonical type definitions
-│   ├── stub/            # Stub registry + matching engine
-│   ├── matcher/         # Individual request matchers
-│   ├── admin/           # Admin API handlers
-│   ├── log/             # Request logging (ring buffer)
-│   ├── server/          # (reserved for future server abstractions)
-│   ├── templating/      # (Slice 6)
-│   ├── fault/           # (Slice 7)
-│   ├── proxy/           # (Slice 8)
-│   ├── scenario/        # (Slice 9)
-│   └── nearmiss/        # (Slice 10)
-├── config/              # Stub file loading (YAML/JSON)
-├── test/integration/    # End-to-end tests
-├── testdata/            # Test fixture files
-├── examples/            # Runnable examples
-└── docs/                # Documentation
-```
+- Request logging with ring buffer
+- Request verification API (Verify, VerifyNotCalled)
+- YAML/JSON stub file loading
 
 ## Building & Testing
 
@@ -336,16 +265,7 @@ go test -race ./...
 
 # Build the CLI binary
 go build -o gmock ./cmd/gmock
-
-# Or use the Makefile
-make test
-make build
-make ci
 ```
-
-## Contributing
-
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

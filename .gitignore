@@ -21,3 +21,7 @@ CLAUDE.md
 
 # Claude Code session data
 .claude/
+
+# Internal development docs (not for public repo)
+docs/
+.github/README.md

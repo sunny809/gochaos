@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Repo homepage now shows README instead of GitHub conventions.
+- README simplified to focus on features, removed internal dev docs from navigation.
+- Internal development docs (`docs/`, `.github/README.md`) excluded from public repo.
+
 ### Added
 
 - **Response templating** — `internal/templating/engine.go` with text/template-based
