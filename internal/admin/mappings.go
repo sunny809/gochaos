@@ -2,9 +2,11 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/sunny809/gochaos/internal/spec"
+	"github.com/sunny809/gochaos/internal/stub"
 )
 
 // createMapping handles POST /__admin/mappings.
@@ -18,6 +20,11 @@ func (h *Handler) createMapping(w http.ResponseWriter, r *http.Request) {
 
 	id, err := h.registry.Add(def)
 	if err != nil {
+		var valErr *stub.ValidationError
+		if errors.As(err, &valErr) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

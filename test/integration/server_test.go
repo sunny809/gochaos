@@ -744,3 +744,278 @@ func TestGzipCompression(t *testing.T) {
 		t.Errorf("expected no gzip without Accept-Encoding")
 	}
 }
+
+// --- F5: Fault Injection Integration Tests ---
+
+func TestErrorFault(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/fault/error",
+		},
+		Response: gmock.ResponseDefinition{
+			Status:  http.StatusOK,
+			Headers: map[string]string{"Content-Type": "text/plain", "X-Custom": "ignored"},
+			Body:    "this should be ignored",
+			Fault:   &gmock.FaultDefinition{Type: "error"},
+		},
+	})
+
+	resp, err := http.Get(server.URL() + "/api/fault/error")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Error fault must return 500
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", resp.StatusCode)
+	}
+
+	// Content-Type must be application/json
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %s", ct)
+	}
+
+	// Body must contain fault error JSON
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"fault":"error"`) {
+		t.Errorf("expected body to contain fault error, got %s", string(body))
+	}
+	if !strings.Contains(string(body), `"error"`) {
+		t.Errorf("expected body to contain error field, got %s", string(body))
+	}
+
+	// Stub-defined body/headers must be ignored
+	if resp.Header.Get("X-Custom") != "" {
+		t.Errorf("stub header X-Custom should not be present on fault response")
+	}
+}
+
+func TestEmptyFault(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/fault/empty",
+		},
+		Response: gmock.ResponseDefinition{
+			Status:  http.StatusCreated,
+			Headers: map[string]string{"Content-Type": "application/json", "X-Should-Be-Gone": "yes"},
+			Body:    "this should not appear",
+			Fault:   &gmock.FaultDefinition{Type: "empty"},
+		},
+	})
+
+	resp, err := http.Get(server.URL() + "/api/fault/empty")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Empty fault returns default 200, not stub-defined status
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// Body must be empty
+	body, _ := io.ReadAll(resp.Body)
+	if len(body) != 0 {
+		t.Errorf("expected empty body, got %q", string(body))
+	}
+
+	// Stub-defined headers must not be present
+	if ct := resp.Header.Get("Content-Type"); ct == "application/json" {
+		t.Errorf("stub Content-Type header should not be present on empty fault response")
+	}
+	if resp.Header.Get("X-Should-Be-Gone") != "" {
+		t.Errorf("stub X-Should-Be-Gone header should not be present on empty fault response")
+	}
+}
+
+func TestConnectionResetFault(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/fault/reset",
+		},
+		Response: gmock.ResponseDefinition{
+			Fault: &gmock.FaultDefinition{Type: "connection_reset"},
+		},
+	})
+
+	resp, err := http.Get(server.URL() + "/api/fault/reset")
+	if err != nil {
+		// If the connection was actually reset, we get a transport error
+		t.Logf("connection reset caused transport error (expected in some cases): %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// If we did get a response, it must be the Hijacker fallback:
+	// 500 with Connection: close and JSON body
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500 (fallback), got %d", resp.StatusCode)
+	}
+
+	if got := resp.Header.Get("Connection"); got != "close" {
+		t.Errorf("expected Connection: close, got %q", got)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "connection_reset") {
+		t.Errorf("expected body to contain connection_reset, got %s", string(body))
+	}
+}
+
+func TestFaultViaAdminAPI(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	// Create a fault stub via the admin API
+	stubJSON := []byte(`{
+		"request": {"method": "GET", "urlPath": "/api/fault/admin-error"},
+		"response": {"fault": {"type": "error"}}
+	}`)
+
+	createReq, _ := http.NewRequest(http.MethodPost,
+		server.AdminURL()+"/__admin/mappings",
+		bytes.NewReader(stubJSON))
+	createReq.Header.Set("Content-Type", "application/json")
+
+	createResp, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatalf("create stub failed: %v", err)
+	}
+	defer createResp.Body.Close()
+
+	if createResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createResp.Body)
+		t.Fatalf("expected 201, got %d, body: %s", createResp.StatusCode, string(body))
+	}
+
+	// Now hit the stub URL and verify fault response
+	resp, err := http.Get(server.URL() + "/api/fault/admin-error")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"fault":"error"`) {
+		t.Errorf("expected fault error body, got %s", string(body))
+	}
+
+	// Now try creating a stub with an invalid fault type → expect 400
+	invalidStubJSON := []byte(`{
+		"request": {"method": "GET", "urlPath": "/api/fault/invalid"},
+		"response": {"fault": {"type": "nonexistent_fault"}}
+	}`)
+
+	invalidReq, _ := http.NewRequest(http.MethodPost,
+		server.AdminURL()+"/__admin/mappings",
+		bytes.NewReader(invalidStubJSON))
+	invalidReq.Header.Set("Content-Type", "application/json")
+
+	invalidResp, err := http.DefaultClient.Do(invalidReq)
+	if err != nil {
+		t.Fatalf("invalid stub request failed: %v", err)
+	}
+	defer invalidResp.Body.Close()
+
+	if invalidResp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(invalidResp.Body)
+		t.Errorf("expected 400 for invalid fault type, got %d, body: %s", invalidResp.StatusCode, string(body))
+	}
+}
+
+func TestFaultWithDelay(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/fault/delayed-error",
+		},
+		Response: gmock.ResponseDefinition{
+			Status: http.StatusOK,
+			Body:   "should not appear",
+			Delay:  &gmock.DelayDefinition{Type: "fixed", Value: 100},
+			Fault:  &gmock.FaultDefinition{Type: "error"},
+		},
+	})
+
+	start := time.Now()
+	resp, err := http.Get(server.URL() + "/api/fault/delayed-error")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Must be delayed by at least ~100ms
+	if elapsed < 90*time.Millisecond {
+		t.Errorf("expected delay of at least 100ms, got %v", elapsed)
+	}
+
+	// Must return the fault response, not the stub body
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "should not appear") {
+		t.Errorf("stub body should not appear in fault response, got %s", string(body))
+	}
+	if !strings.Contains(string(body), `"fault":"error"`) {
+		t.Errorf("expected fault error body, got %s", string(body))
+	}
+}
+
+func TestFaultNoGzip(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/fault/no-gzip",
+		},
+		Response: gmock.ResponseDefinition{
+			Fault: &gmock.FaultDefinition{Type: "error"},
+		},
+	})
+
+	// Request with Accept-Encoding: gzip
+	req, _ := http.NewRequest(http.MethodGet, server.URL()+"/api/fault/no-gzip", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Fault response must NOT be gzip-compressed
+	if ce := resp.Header.Get("Content-Encoding"); ce == "gzip" {
+		t.Error("fault response should not be gzip-compressed")
+	}
+
+	// Body must be plain JSON, not compressed bytes
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"fault":"error"`) {
+		t.Errorf("expected plain JSON fault body, got %s", string(body))
+	}
+}

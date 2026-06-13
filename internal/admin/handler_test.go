@@ -315,3 +315,39 @@ func TestIsAdminPath(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateMappingInvalidFaultType(t *testing.T) {
+	h, _, _ := setupTest()
+
+	stubJSON := `{"request":{"method":"GET","urlPath":"/fault"},"response":{"status":500,"fault":{"type":"INVALID"}}}`
+	req := httptest.NewRequest("POST", "/__admin/mappings", bytes.NewReader([]byte(stubJSON)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid fault type, got %d", w.Code)
+	}
+}
+
+func TestCreateMappingValidFaultType(t *testing.T) {
+	h, _, _ := setupTest()
+
+	stubJSON := `{"request":{"method":"GET","urlPath":"/fault"},"response":{"status":500,"fault":{"type":"connection_reset"}}}`
+	req := httptest.NewRequest("POST", "/__admin/mappings", bytes.NewReader([]byte(stubJSON)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected 201 for valid fault type, got %d", w.Code)
+	}
+
+	var created spec.StubDefinition
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if created.Response.Fault == nil || created.Response.Fault.Type != "connection_reset" {
+		t.Errorf("expected fault type connection_reset, got %+v", created.Response.Fault)
+	}
+}

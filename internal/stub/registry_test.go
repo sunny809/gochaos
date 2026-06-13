@@ -1,10 +1,12 @@
 package stub_test
 
 import (
+	"errors"
 	"net/http/httptest"
 	"sync"
 	"testing"
 
+	"github.com/sunny809/gochaos/internal/spec"
 	"github.com/sunny809/gochaos/internal/stub"
 	"github.com/sunny809/gochaos/pkg/gmock"
 )
@@ -269,5 +271,64 @@ func TestEngineEmptyRegistry(t *testing.T) {
 	result := engine.Match(req)
 	if result != nil {
 		t.Errorf("expected no match on empty registry, got %+v", result)
+	}
+}
+
+func TestRegistry_Add_InvalidFault(t *testing.T) {
+	r := stub.NewRegistry()
+
+	tests := []struct {
+		name      string
+		faultType string
+		wantErr   bool
+	}{
+		{name: "valid fault type error", faultType: "error", wantErr: false},
+		{name: "valid fault type empty", faultType: "empty", wantErr: false},
+		{name: "valid fault type connection_reset", faultType: "connection_reset", wantErr: false},
+		{name: "invalid fault type", faultType: "INVALID", wantErr: true},
+		{name: "case-sensitive mismatch", faultType: "Error", wantErr: true},
+		{name: "hyphen instead of underscore", faultType: "connection-reset", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			def := spec.StubDefinition{
+				Request: spec.RequestPattern{Method: "GET", URLPath: "/test"},
+				Response: spec.ResponseDefinition{
+					Status: 200,
+					Fault:  &spec.FaultDefinition{Type: tt.faultType},
+				},
+			}
+			_, err := r.Add(def)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Add() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				var valErr *stub.ValidationError
+				if !errors.As(err, &valErr) {
+					t.Errorf("expected *stub.ValidationError, got %T: %v", err, err)
+				}
+				if valErr.Field != "fault.type" {
+					t.Errorf("expected field fault.type, got %q", valErr.Field)
+				}
+			}
+		})
+	}
+}
+
+func TestRegistry_Add_NoFault(t *testing.T) {
+	r := stub.NewRegistry()
+
+	// Stub with nil fault should succeed
+	def := spec.StubDefinition{
+		Request:  spec.RequestPattern{Method: "GET", URLPath: "/test"},
+		Response: spec.ResponseDefinition{Status: 200},
+	}
+	id, err := r.Add(def)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id == "" {
+		t.Error("expected non-empty ID")
 	}
 }

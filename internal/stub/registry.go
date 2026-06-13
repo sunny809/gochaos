@@ -8,8 +8,17 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/sunny809/gochaos/internal/response"
 	"github.com/sunny809/gochaos/internal/spec"
 )
+
+// ValidationError indicates a stub definition failed validation.
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e *ValidationError) Error() string { return e.Field + ": " + e.Message }
 
 // Record wraps a StubDefinition with internal metadata.
 type Record struct {
@@ -48,6 +57,13 @@ func (r *Registry) Add(def spec.StubDefinition) (string, error) {
 			return "", fmt.Errorf("stub: failed to generate ID: %w", err)
 		}
 		def.ID = id
+	}
+
+	// Validate fault type if specified
+	if def.Response.Fault != nil {
+		if err := response.ValidateFaultType(def.Response.Fault.Type); err != nil {
+			return "", &ValidationError{Field: "fault.type", Message: err.Error()}
+		}
 	}
 
 	// Merge top-level priority into request priority

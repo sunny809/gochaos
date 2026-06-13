@@ -1,0 +1,54 @@
+[
+  {
+    "name": "error-fault",
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/fault/error"
+    },
+    "response": {
+      "fault": {
+        "type": "error"
+      }
+    }
+  },
+  {
+    "name": "empty-fault",
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/fault/empty"
+    },
+    "response": {
+      "fault": {
+        "type": "empty"
+      }
+    }
+  },
+  {
+    "name": "connection-reset-fault",
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/fault/reset"
+    },
+    "response": {
+      "fault": {
+        "type": "connection_reset"
+      }
+    }
+  },
+  {
+    "name": "delayed-error-fault",
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/fault/delayed-error"
+    },
+    "response": {
+      "delay": {
+        "type": "fixed",
+        "value": 100
+      },
+      "fault": {
+        "type": "error"
+      }
+    }
+  }
+]

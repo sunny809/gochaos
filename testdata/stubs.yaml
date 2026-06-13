@@ -52,4 +52,30 @@ mappings:
       body: '{"slow":true}'
       delay:
         type: fixed
-        value: 1000  # 1 second delay (implemented in Slice 7)
+        value: 1000  # 1 second delay
+
+  # --- Fault injection stubs ---
+
+  - name: error-fault
+    request:
+      method: GET
+      urlPath: /api/fault/error
+    response:
+      fault:
+        type: error
+
+  - name: empty-fault
+    request:
+      method: GET
+      urlPath: /api/fault/empty
+    response:
+      fault:
+        type: empty
+
+  - name: connection-reset-fault
+    request:
+      method: GET
+      urlPath: /api/fault/reset
+    response:
+      fault:
+        type: connection_reset

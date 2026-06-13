@@ -52,9 +52,19 @@ func NewHTTPWriter(logger *slog.Logger, disableGzip bool) *HTTPWriter {
 }
 
 // WriteResponse writes the stub response to the client.
-// It handles: delay, CORS headers, stub headers, status, body (incl. base64).
+// It handles: delay, fault injection, gzip, CORS headers, stub headers, status, body (incl. base64).
 func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinition, req *http.Request, corsOpts *CORSOptions) error {
-	// Wrap with gzip if client accepts it
+	resp := def.Response
+
+	// 1. Apply delay before writing anything (simulates network latency)
+	w.applyDelay(resp.Delay)
+
+	// 2. Apply fault on the original ResponseWriter (faults bypass gzip)
+	if w.applyFault(rw, resp.Fault, req) {
+		return nil
+	}
+
+	// 3. Wrap with gzip only if no fault was applied
 	gw, rw := w.maybeWrapGzip(rw, req)
 	if gw != nil {
 		defer func() {
@@ -64,15 +74,10 @@ func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinit
 		}()
 	}
 
-	resp := def.Response
-
-	// Apply delay before writing anything (simulates network latency)
-	w.applyDelay(resp.Delay)
-
-	// Apply CORS headers if enabled (before stub-specific headers so they can override)
+	// 4. Apply CORS headers if enabled (before stub-specific headers so they can override)
 	w.applyCORSHeaders(rw, corsOpts)
 
-	// Headers
+	// 5. Headers
 	for k, v := range resp.Headers {
 		rw.Header().Set(k, v)
 	}
@@ -134,6 +139,63 @@ func (w *HTTPWriter) applyDelay(delay *spec.DelayDefinition) {
 			}
 			time.Sleep(time.Duration(d) * time.Millisecond)
 		}
+	}
+}
+
+// applyFault injects a network-level fault into the response.
+// Returns true if a fault was applied (short-circuits normal response writing),
+// false if no fault is configured and normal response writing should proceed.
+// Fault responses are written directly to the original ResponseWriter,
+// bypassing gzip compression.
+func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinition, req *http.Request) bool {
+	if fault == nil {
+		return false
+	}
+
+	switch fault.Type {
+	case "error":
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(http.StatusInternalServerError)
+		_, _ = rw.Write([]byte(`{"error":"internal server error","fault":"error"}`))
+		return true
+	case "empty":
+		// Send an empty response: no headers, no explicit status (Go defaults to 200),
+		// no body. Optionally flush to ensure the response is sent immediately.
+		if f, ok := rw.(http.Flusher); ok {
+			f.Flush()
+		}
+		return true
+	case "connection_reset":
+		// Attempt to Hijack the underlying TCP connection and close it,
+		// causing the client to receive a TCP RST (connection reset by peer).
+		inner := unwrapResponseWriter(rw)
+		if hj, ok := inner.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				// Hijack failed — fall back to 500 close instead of panicking.
+				w.logger.Warn("hijack failed, falling back to 500 close", "error", err)
+				rw.Header().Set("Connection", "close")
+				rw.Header().Set("Content-Type", "application/json")
+				rw.WriteHeader(http.StatusInternalServerError)
+				_, _ = rw.Write([]byte(`{"error":"connection reset by peer","fault":"connection_reset"}`))
+				return true
+			}
+			// Successfully hijacked — close the connection to send TCP RST.
+			_ = conn.Close()
+			return true
+		}
+		// Hijacker not available (e.g. wrapped ResponseWriter in tests or proxies).
+		// Fall back to a 500 response with Connection: close.
+		w.logger.Warn("hijacker not available, falling back to 500 close")
+		rw.Header().Set("Connection", "close")
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(http.StatusInternalServerError)
+		_, _ = rw.Write([]byte(`{"error":"connection reset by peer","fault":"connection_reset"}`))
+		return true
+	default:
+		// Unknown fault types are ignored; normal response proceeds.
+		w.logger.Warn("unknown fault type, skipping fault injection", "faultType", fault.Type)
+		return false
 	}
 }
 
@@ -220,9 +282,32 @@ func (w *GzipResponseWriter) Write(b []byte) (int, error) {
 	return w.GW.Write(b)
 }
 
+// Unwrap returns the underlying http.ResponseWriter.
+// This supports the Go 1.20+ ResponseWriter unwrapping pattern,
+// allowing callers to access interfaces (e.g. http.Hijacker) on the inner writer.
+func (w *GzipResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 // Close flushes the gzip writer.
 func (w *GzipResponseWriter) Close() error {
 	return w.GW.Close()
+}
+
+// unwrapResponseWriter recursively unwraps ResponseWriters that implement
+// the Unwrap() http.ResponseWriter interface (Go 1.20+ pattern).
+// This is used to reach the underlying writer for operations like Hijack.
+func unwrapResponseWriter(rw http.ResponseWriter) http.ResponseWriter {
+	for {
+		unwrap, ok := rw.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			break
+		}
+		inner := unwrap.Unwrap()
+		if inner == nil {
+			break
+		}
+		rw = inner
+	}
+	return rw
 }
 
 // maybeWrapGzip wraps the ResponseWriter in a gzip compressor if the client

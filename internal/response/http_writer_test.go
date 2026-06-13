@@ -1,12 +1,14 @@
 package response
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -670,9 +672,682 @@ func TestHTTPWriter_WriteResponse_TemplateRendering(t *testing.T) {
 	}
 }
 
+func TestHTTPWriter_WriteResponse_FaultError(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, true)
+
+	tests := []struct {
+		name       string
+		def        *spec.StubDefinition
+		wantStatus int
+		wantBody   string
+		wantHeader map[string]string
+	}{
+		{
+			name: "error fault returns 500 with JSON body",
+			def: &spec.StubDefinition{
+				ID: "fault-error-stub",
+				Response: spec.ResponseDefinition{
+					Fault: &spec.FaultDefinition{Type: "error"},
+				},
+			},
+			wantStatus: 500,
+			wantBody:   `{"error":"internal server error","fault":"error"}`,
+			wantHeader: map[string]string{
+				"Content-Type": "application/json",
+			},
+		},
+		{
+			name: "error fault ignores stub status headers and body",
+			def: &spec.StubDefinition{
+				ID: "fault-override-stub",
+				Response: spec.ResponseDefinition{
+					Status: 200,
+					Headers: map[string]string{
+						"X-Custom": "should-be-ignored",
+					},
+					Body: "this body should not appear",
+					Fault: &spec.FaultDefinition{Type: "error"},
+				},
+			},
+			wantStatus: 500,
+			wantBody:   `{"error":"internal server error","fault":"error"}`,
+			wantHeader: map[string]string{
+				"Content-Type": "application/json",
+			},
+		},
+		{
+			name: "nil fault returns normal response",
+			def: &spec.StubDefinition{
+				ID: "no-fault-stub",
+				Response: spec.ResponseDefinition{
+					Status: 200,
+					Body:   "normal response",
+				},
+			},
+			wantStatus: 200,
+			wantBody:   "normal response",
+		},
+		{
+			name: "unknown fault type falls through to normal response",
+			def: &spec.StubDefinition{
+				ID: "unknown-fault-stub",
+				Response: spec.ResponseDefinition{
+					Status: 200,
+					Body:   "fallback response",
+					Fault:  &spec.FaultDefinition{Type: "nonexistent"},
+				},
+			},
+			wantStatus: 200,
+			wantBody:   "fallback response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			err := w.WriteResponse(rr, tt.def, req, nil)
+			if err != nil {
+				t.Fatalf("WriteResponse failed: %v", err)
+			}
+
+			if rr.Code != tt.wantStatus {
+				t.Errorf("status code = %d, want %d", rr.Code, tt.wantStatus)
+			}
+
+			body := rr.Body.String()
+			if body != tt.wantBody {
+				t.Errorf("body = %q, want %q", body, tt.wantBody)
+			}
+
+			for key, wantVal := range tt.wantHeader {
+				if got := rr.Header().Get(key); got != wantVal {
+					t.Errorf("header %q = %q, want %q", key, got, wantVal)
+				}
+			}
+		})
+	}
+}
+
+func TestHTTPWriter_WriteResponse_FaultWithDelay(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, true)
+
+	// Fault combined with delay: delay is applied first, then fault response
+	def := &spec.StubDefinition{
+		ID: "fault-delay-stub",
+		Response: spec.ResponseDefinition{
+			Status: 200,
+			Body:   "should not appear",
+			Delay:  &spec.DelayDefinition{Type: "fixed", Value: 50},
+			Fault:  &spec.FaultDefinition{Type: "error"},
+		},
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	start := time.Now()
+	err := w.WriteResponse(rr, def, req, nil)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("WriteResponse failed: %v", err)
+	}
+
+	if elapsed < 45*time.Millisecond {
+		t.Errorf("elapsed %v < 45ms, delay was not applied before fault", elapsed)
+	}
+
+	if rr.Code != 500 {
+		t.Errorf("status code = %d, want 500", rr.Code)
+	}
+
+	wantBody := `{"error":"internal server error","fault":"error"}`
+	if rr.Body.String() != wantBody {
+		t.Errorf("body = %q, want %q", rr.Body.String(), wantBody)
+	}
+}
+
+func TestHTTPWriter_WriteResponse_FaultNotGzipped(t *testing.T) {
+	// Verify that fault responses are NOT gzip-compressed even when
+	// the client accepts gzip encoding.
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, false) // gzip enabled
+
+	def := &spec.StubDefinition{
+		ID: "fault-gzip-stub",
+		Response: spec.ResponseDefinition{
+			Fault: &spec.FaultDefinition{Type: "error"},
+		},
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	err := w.WriteResponse(rr, def, req, nil)
+	if err != nil {
+		t.Fatalf("WriteResponse failed: %v", err)
+	}
+
+	// Fault response must NOT have Content-Encoding: gzip
+	if ce := rr.Header().Get("Content-Encoding"); ce != "" {
+		t.Errorf("Content-Encoding = %q, want empty (fault should not be gzipped)", ce)
+	}
+
+	// Body must be plain JSON, not compressed bytes
+	wantBody := `{"error":"internal server error","fault":"error"}`
+	if rr.Body.String() != wantBody {
+		t.Errorf("body = %q, want %q", rr.Body.String(), wantBody)
+	}
+
+	if rr.Code != 500 {
+		t.Errorf("status code = %d, want 500", rr.Code)
+	}
+}
+
+func TestHTTPWriter_WriteResponse_FaultEmpty(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, true)
+
+	tests := []struct {
+		name       string
+		def        *spec.StubDefinition
+		wantStatus int
+		wantBody   string
+		wantHeader map[string]string
+		dontWant   []string // headers that must NOT be present
+	}{
+		{
+			name: "empty fault returns empty body and default status 200",
+			def: &spec.StubDefinition{
+				ID: "fault-empty-stub",
+				Response: spec.ResponseDefinition{
+					Fault: &spec.FaultDefinition{Type: "empty"},
+				},
+			},
+			wantStatus: 200,
+			wantBody:   "",
+			dontWant:   []string{"Content-Type", "X-Custom"},
+		},
+		{
+			name: "empty fault overrides stub body headers and status",
+			def: &spec.StubDefinition{
+				ID: "fault-empty-override-stub",
+				Response: spec.ResponseDefinition{
+					Status: 404,
+					Headers: map[string]string{
+						"Content-Type": "application/json",
+						"X-Custom":     "should-be-ignored",
+					},
+					Body:  "this body should not appear",
+					Fault: &spec.FaultDefinition{Type: "empty"},
+				},
+			},
+			wantStatus: 200,
+			wantBody:   "",
+			dontWant:   []string{"Content-Type", "X-Custom"},
+		},
+		{
+			name: "empty fault with delay is delayed then empty",
+			def: &spec.StubDefinition{
+				ID: "fault-empty-delay-stub",
+				Response: spec.ResponseDefinition{
+					Status: 200,
+					Body:   "should not appear",
+					Delay:  &spec.DelayDefinition{Type: "fixed", Value: 50},
+					Fault:  &spec.FaultDefinition{Type: "empty"},
+				},
+			},
+			wantStatus: 200,
+			wantBody:   "",
+			dontWant:   []string{"Content-Type"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			start := time.Now()
+			err := w.WriteResponse(rr, tt.def, req, nil)
+			elapsed := time.Since(start)
+
+			if err != nil {
+				t.Fatalf("WriteResponse failed: %v", err)
+			}
+
+			if rr.Code != tt.wantStatus {
+				t.Errorf("status code = %d, want %d", rr.Code, tt.wantStatus)
+			}
+
+			if body := rr.Body.String(); body != tt.wantBody {
+				t.Errorf("body = %q, want %q", body, tt.wantBody)
+			}
+
+			for _, hdr := range tt.dontWant {
+				if got := rr.Header().Get(hdr); got != "" {
+					t.Errorf("header %q = %q, want empty (not set)", hdr, got)
+				}
+			}
+
+			for key, wantVal := range tt.wantHeader {
+				if got := rr.Header().Get(key); got != wantVal {
+					t.Errorf("header %q = %q, want %q", key, got, wantVal)
+				}
+			}
+
+			// Verify delay was applied for the delay+empty test
+			if tt.def.Response.Delay != nil && elapsed < 45*time.Millisecond {
+				t.Errorf("elapsed %v < 45ms, delay was not applied before empty fault", elapsed)
+			}
+		})
+	}
+}
+
+func TestHTTPWriter_WriteResponse_FaultEmptyNotGzipped(t *testing.T) {
+	// Verify that empty fault responses are NOT gzip-compressed even when
+	// the client accepts gzip encoding.
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, false) // gzip enabled
+
+	def := &spec.StubDefinition{
+		ID: "fault-empty-gzip-stub",
+		Response: spec.ResponseDefinition{
+			Fault: &spec.FaultDefinition{Type: "empty"},
+		},
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	err := w.WriteResponse(rr, def, req, nil)
+	if err != nil {
+		t.Fatalf("WriteResponse failed: %v", err)
+	}
+
+	// Empty fault must NOT have Content-Encoding: gzip
+	if ce := rr.Header().Get("Content-Encoding"); ce != "" {
+		t.Errorf("Content-Encoding = %q, want empty (empty fault should not be gzipped)", ce)
+	}
+
+	// Body must be empty
+	if rr.Body.String() != "" {
+		t.Errorf("body = %q, want empty", rr.Body.String())
+	}
+
+	if rr.Code != 200 {
+		t.Errorf("status code = %d, want 200", rr.Code)
+	}
+}
+
 func TestCORSOptionsFromConfig(t *testing.T) {
 	// Verify that the conversion function works correctly
 	// This is tested indirectly through integration tests,
 	// but we verify the types are compatible here.
 	var _ *CORSOptions = (*CORSOptions)(nil)
+}
+
+// mockHijacker wraps an http.ResponseWriter and implements http.Hijacker.
+// It returns a real net.Conn (from net.Pipe) so that Close() works in tests.
+type mockHijacker struct {
+	http.ResponseWriter
+	hijacked bool
+	conn     net.Conn
+}
+
+func (m *mockHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	m.hijacked = true
+	server, client := net.Pipe()
+	m.conn = server // server side: the one we Close() to simulate RST
+	// Close the client side immediately — we don't need it in the test.
+	_ = client.Close()
+	return server, nil, nil
+}
+
+func TestHTTPWriter_WriteResponse_FaultConnectionReset_HijackerAvailable(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, true)
+
+	def := &spec.StubDefinition{
+		ID: "fault-connreset-stub",
+		Response: spec.ResponseDefinition{
+			Fault: &spec.FaultDefinition{Type: "connection_reset"},
+		},
+	}
+
+	rr := httptest.NewRecorder()
+	hj := &mockHijacker{ResponseWriter: rr}
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+	err := w.WriteResponse(hj, def, req, nil)
+	if err != nil {
+		t.Fatalf("WriteResponse failed: %v", err)
+	}
+
+	// Hijack must have been called
+	if !hj.hijacked {
+		t.Error("Hijack() was not called, expected it to be called for connection_reset fault")
+	}
+
+	// The connection returned by Hijack should be closed now.
+	// A write to the closed conn should fail.
+	_ = hj.conn.Close() // close again to verify double-close doesn't panic
+}
+
+func TestHTTPWriter_WriteResponse_FaultConnectionReset_HijackerNotAvailable(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, true)
+
+	def := &spec.StubDefinition{
+		ID: "fault-connreset-nohj-stub",
+		Response: spec.ResponseDefinition{
+			Fault: &spec.FaultDefinition{Type: "connection_reset"},
+		},
+	}
+
+	// httptest.NewRecorder does NOT implement http.Hijacker, so this tests the fallback path.
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+	err := w.WriteResponse(rr, def, req, nil)
+	if err != nil {
+		t.Fatalf("WriteResponse failed: %v", err)
+	}
+
+	// Fallback: should return 500 with Connection: close
+	if rr.Code != 500 {
+		t.Errorf("status code = %d, want 500", rr.Code)
+	}
+
+	wantBody := `{"error":"connection reset by peer","fault":"connection_reset"}`
+	if rr.Body.String() != wantBody {
+		t.Errorf("body = %q, want %q", rr.Body.String(), wantBody)
+	}
+
+	if got := rr.Header().Get("Connection"); got != "close" {
+		t.Errorf("Connection header = %q, want %q", got, "close")
+	}
+
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type header = %q, want %q", got, "application/json")
+	}
+}
+
+func TestHTTPWriter_WriteResponse_FaultConnectionReset_WithDelay(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, true)
+
+	def := &spec.StubDefinition{
+		ID: "fault-connreset-delay-stub",
+		Response: spec.ResponseDefinition{
+			Delay: &spec.DelayDefinition{Type: "fixed", Value: 50},
+			Fault: &spec.FaultDefinition{Type: "connection_reset"},
+		},
+	}
+
+	rr := httptest.NewRecorder()
+	hj := &mockHijacker{ResponseWriter: rr}
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+	start := time.Now()
+	err := w.WriteResponse(hj, def, req, nil)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("WriteResponse failed: %v", err)
+	}
+
+	// Delay must have been applied before the fault
+	if elapsed < 45*time.Millisecond {
+		t.Errorf("elapsed %v < 45ms, delay was not applied before connection_reset fault", elapsed)
+	}
+
+	// Hijack must have been called after the delay
+	if !hj.hijacked {
+		t.Error("Hijack() was not called after delay")
+	}
+}
+
+func TestHTTPWriter_WriteResponse_FaultConnectionReset_NotGzipped(t *testing.T) {
+	// Verify that connection_reset fault responses (fallback path) are NOT
+	// gzip-compressed even when the client accepts gzip encoding.
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, false) // gzip enabled
+
+	def := &spec.StubDefinition{
+		ID: "fault-connreset-gzip-stub",
+		Response: spec.ResponseDefinition{
+			Fault: &spec.FaultDefinition{Type: "connection_reset"},
+		},
+	}
+
+	// httptest.NewRecorder does not implement Hijacker, so this goes through the fallback path.
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	err := w.WriteResponse(rr, def, req, nil)
+	if err != nil {
+		t.Fatalf("WriteResponse failed: %v", err)
+	}
+
+	// Connection reset fallback must NOT have Content-Encoding: gzip
+	if ce := rr.Header().Get("Content-Encoding"); ce != "" {
+		t.Errorf("Content-Encoding = %q, want empty (connection_reset fallback should not be gzipped)", ce)
+	}
+
+	// Body must be plain JSON, not compressed bytes
+	wantBody := `{"error":"connection reset by peer","fault":"connection_reset"}`
+	if rr.Body.String() != wantBody {
+		t.Errorf("body = %q, want %q", rr.Body.String(), wantBody)
+	}
+
+	if rr.Code != 500 {
+		t.Errorf("status code = %d, want 500", rr.Code)
+	}
+}
+
+func TestUnwrapResponseWriter(t *testing.T) {
+	tests := []struct {
+		name string
+		rw   http.ResponseWriter
+		want string
+	}{
+		{
+			name: "plain ResponseWriter returns itself",
+			rw:   httptest.NewRecorder(),
+			want: "*httptest.ResponseRecorder",
+		},
+		{
+			name: "single wrap unwraps to inner",
+			rw: &GzipResponseWriter{
+				ResponseWriter: httptest.NewRecorder(),
+			},
+			want: "*httptest.ResponseRecorder",
+		},
+		{
+			name: "double wrap unwraps to innermost",
+			rw: &GzipResponseWriter{
+				ResponseWriter: &GzipResponseWriter{
+					ResponseWriter: httptest.NewRecorder(),
+				},
+			},
+			want: "*httptest.ResponseRecorder",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inner := unwrapResponseWriter(tt.rw)
+			got := fmt.Sprintf("%T", inner)
+			if got != tt.want {
+				t.Errorf("unwrapResponseWriter returned %T, want %s", inner, tt.want)
+			}
+		})
+	}
+}
+
+func TestHTTPWriter_ApplyFault(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	tests := []struct {
+		name       string
+		disableGz  bool
+		fault      *spec.FaultDefinition
+		hijacker   bool
+		wantReturn bool
+		wantStatus int
+		wantBody   string
+		wantHeader map[string]string
+		dontWant   []string
+	}{
+		{
+			name:       "nil fault returns false — normal response continues",
+			fault:      nil,
+			wantReturn: false,
+			wantStatus: 0, // no status written
+		},
+		{
+			name:       "error fault returns true with 500 JSON",
+			fault:      &spec.FaultDefinition{Type: "error"},
+			wantReturn: true,
+			wantStatus: 500,
+			wantBody:   `{"error":"internal server error","fault":"error"}`,
+			wantHeader: map[string]string{"Content-Type": "application/json"},
+		},
+		{
+			name:       "empty fault returns true with empty body",
+			fault:      &spec.FaultDefinition{Type: "empty"},
+			wantReturn: true,
+			wantStatus: 0, // Go defaults to 200, but WriteHeader is not called explicitly
+			wantBody:   "",
+			dontWant:   []string{"Content-Type"},
+		},
+		{
+			name:       "connection_reset without Hijacker falls back to 500",
+			fault:      &spec.FaultDefinition{Type: "connection_reset"},
+			hijacker:   false,
+			wantReturn: true,
+			wantStatus: 500,
+			wantBody:   `{"error":"connection reset by peer","fault":"connection_reset"}`,
+			wantHeader: map[string]string{
+				"Connection":   "close",
+				"Content-Type": "application/json",
+			},
+		},
+		{
+			name:       "connection_reset with Hijacker hijacks and closes",
+			fault:      &spec.FaultDefinition{Type: "connection_reset"},
+			hijacker:   true,
+			wantReturn: true,
+			// No assertions on status/body since the connection is hijacked and closed
+		},
+		{
+			name:       "unknown fault type returns false — normal response continues",
+			fault:      &spec.FaultDefinition{Type: "unknown"},
+			wantReturn: false,
+			wantStatus: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := NewHTTPWriter(logger, tt.disableGz)
+			rr := httptest.NewRecorder()
+
+			var rw http.ResponseWriter = rr
+			if tt.hijacker {
+				rw = &mockHijacker{ResponseWriter: rr}
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			result := w.applyFault(rw, tt.fault, req)
+
+			if result != tt.wantReturn {
+				t.Errorf("applyFault() = %v, want %v", result, tt.wantReturn)
+			}
+
+			if !result {
+				return // no response was written, skip body/header checks
+			}
+
+			if tt.hijacker && tt.fault != nil && tt.fault.Type == "connection_reset" {
+				hj := rw.(*mockHijacker)
+				if !hj.hijacked {
+					t.Error("expected Hijack() to be called")
+				}
+				return // connection was hijacked, no status/body to check
+			}
+
+			if tt.wantStatus != 0 && rr.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
+			}
+			if tt.wantBody != "" && rr.Body.String() != tt.wantBody {
+				t.Errorf("body = %q, want %q", rr.Body.String(), tt.wantBody)
+			}
+			if tt.wantBody == "" && rr.Body.String() != "" {
+				t.Errorf("body = %q, want empty", rr.Body.String())
+			}
+			for k, v := range tt.wantHeader {
+				if got := rr.Header().Get(k); got != v {
+					t.Errorf("header %q = %q, want %q", k, got, v)
+				}
+			}
+			for _, hdr := range tt.dontWant {
+				if got := rr.Header().Get(hdr); got != "" {
+					t.Errorf("header %q = %q, want empty (not set)", hdr, got)
+				}
+			}
+		})
+	}
+}
+
+func TestHTTPWriter_ApplyFault_ConcurrentSafety(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := NewHTTPWriter(logger, true)
+
+	faults := []*spec.FaultDefinition{
+		nil,
+		{Type: "error"},
+		{Type: "empty"},
+		{Type: "connection_reset"},
+	}
+
+	done := make(chan struct{}, 100)
+	for i := 0; i < 100; i++ {
+		go func(idx int) {
+			defer func() { done <- struct{}{} }()
+			rr := httptest.NewRecorder()
+			def := &spec.StubDefinition{
+				ID: fmt.Sprintf("concurrent-fault-%d", idx),
+				Response: spec.ResponseDefinition{
+					Status: 200,
+					Body:   fmt.Sprintf("response-%d", idx),
+					Fault:  faults[idx%len(faults)],
+				},
+			}
+			_ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil)
+		}(i)
+	}
+
+	for i := 0; i < 100; i++ {
+		<-done
+	}
+}
+
+func TestGzipResponseWriter_Unwrap(t *testing.T) {
+	inner := httptest.NewRecorder()
+	gw := &GzipResponseWriter{
+		ResponseWriter: inner,
+		GW:             gzip.NewWriter(inner),
+	}
+
+	unwrapped := gw.Unwrap()
+	if unwrapped != inner {
+		t.Errorf("Unwrap() returned %p, want %p", unwrapped, inner)
+	}
 }
