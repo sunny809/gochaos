@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **V1: Full-dimension verification** -- `Verify()` and `VerifyNotCalled()` now support
+  `BodyPattern`, `Headers`, `QueryParams`, `Cookies`, and `URLPathRegex` matching
+  against logged requests. `VerificationResult` exposes the asserted pattern in
+  `BodyPattern`, `HeaderPattern`, and `QueryParamPattern` fields.
+
+- Implemented near-miss diagnostics engine (engine-only; admin endpoint pending in N2).
+
 - **Response templating** — `internal/templating/engine.go` with text/template-based
   response body rendering. Supports custom template functions (`request`, `randomInt`,
   `randomUUID`, `now`, `base64`). 100% test coverage.

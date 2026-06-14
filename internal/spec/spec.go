@@ -133,6 +133,20 @@ type VerificationResult struct {
 	ActualCount   int      `json:"actualCount"`
 	Matched       bool     `json:"matched"`
 	Errors        []string `json:"errors,omitempty"`
+
+	// BodyPattern echoes back the BodyPattern from the request pattern,
+	// or nil when body was not asserted in the verify call.
+	BodyPattern *BodyPattern `json:"bodyPattern,omitempty"`
+
+	// HeaderPattern echoes back the Headers map from the request pattern,
+	// or nil when headers were not asserted. This is a shallow copy of the
+	// caller-supplied pattern to prevent aliasing after Verify returns.
+	HeaderPattern map[string]string `json:"headerPattern,omitempty"`
+
+	// QueryParamPattern echoes back the QueryParams map from the request pattern,
+	// or nil when query params were not asserted. This is a shallow copy of the
+	// caller-supplied pattern to prevent aliasing after Verify returns.
+	QueryParamPattern map[string]string `json:"queryParamPattern,omitempty"`
 }
 
 // --- Match Result ---
@@ -164,4 +178,7 @@ type DimensionScore struct {
 	MaxScore  int    `json:"maxScore"`
 	Expected  string `json:"expected,omitempty"`
 	Actual    string `json:"actual,omitempty"`
+	// Reason is a short, human-readable explanation of why this dimension
+	// did not match. It is empty when Matched is true.
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
