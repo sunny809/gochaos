@@ -1,0 +1,31 @@
+name: license
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-license:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check Apache 2.0 license header
+        run: |
+          MISSING=$(find . -name "*.go" -newer ${{ github.event.pull_request.base.sha }} \
+            ! -path "*/vendor/*" \
+            ! -path "*/.git/*" \
+            ! -name "*_test.go" \
+            -exec sh -c 'head -5 "$1" | grep -q "Apache License" || echo "$1"' _ {} \;)
+          if [ -n "$MISSING" ]; then
+            echo "Files missing Apache 2.0 license header:"
+            echo "$MISSING"
+            exit 1
+          fi
+          echo "All new files have license headers."
