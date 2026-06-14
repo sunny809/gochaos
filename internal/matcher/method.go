@@ -41,3 +41,21 @@ func (m *MethodMatcher) String() string {
 func (m *MethodMatcher) Method() string {
 	return m.method
 }
+
+// Diagnose returns a structured diagnosis for near-miss reporting.
+func (m *MethodMatcher) Diagnose(req *http.Request) Diagnosis {
+	actual := strings.ToUpper(req.Method)
+	d := Diagnosis{
+		Dimension: "method",
+		MaxScore:  10,
+		Expected:  m.method,
+		Actual:    actual,
+	}
+	if strings.EqualFold(req.Method, m.method) {
+		d.Matched = true
+		d.Score = 10
+		return d
+	}
+	d.Reason = fmt.Sprintf("method %s does not equal %s", actual, m.method)
+	return d
+}

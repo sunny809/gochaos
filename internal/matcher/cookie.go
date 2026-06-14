@@ -111,3 +111,45 @@ func (m *CookieMatcher) Name() string {
 func (m *CookieMatcher) Pattern() string {
 	return m.pattern
 }
+
+// Diagnose returns a structured diagnosis for near-miss reporting.
+func (m *CookieMatcher) Diagnose(req *http.Request) Diagnosis {
+	cookies := req.Cookies()
+	var actual string
+	found := false
+	for _, c := range cookies {
+		if c.Name == m.name {
+			actual = c.Value
+			found = true
+			break
+		}
+	}
+
+	d := Diagnosis{
+		Dimension: "cookie:" + m.name,
+		MaxScore:  4,
+		Expected:  m.pattern,
+		Actual:    actual,
+	}
+
+	matched, score := m.ScoreMatch(req)
+	if matched {
+		d.Matched = true
+		d.Score = score
+		return d
+	}
+
+	switch {
+	case m.pattern == "!":
+		d.Reason = fmt.Sprintf("cookie %s should be absent", m.name)
+	case !found:
+		d.Reason = fmt.Sprintf("cookie %s missing", m.name)
+	case m.pattern == "*":
+		d.Reason = fmt.Sprintf("cookie %s value is empty", m.name)
+	case strings.HasPrefix(m.pattern, "~"):
+		d.Reason = fmt.Sprintf("cookie %s=%q does not match regex %s", m.name, actual, m.pattern[1:])
+	default:
+		d.Reason = fmt.Sprintf("cookie %s=%q does not equal %q", m.name, actual, m.pattern)
+	}
+	return d
+}

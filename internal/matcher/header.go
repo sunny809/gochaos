@@ -101,3 +101,45 @@ func (m *HeaderMatcher) Name() string {
 func (m *HeaderMatcher) Pattern() string {
 	return m.pattern
 }
+
+// Diagnose returns a structured diagnosis for near-miss reporting.
+//
+// For absent headers, Actual is left empty (matching the project convention
+// of using empty string to denote "not supplied"). Expected is the configured
+// pattern verbatim (regex prefixed with "~", "*" for any value, "!" for must
+// be absent).
+func (m *HeaderMatcher) Diagnose(req *http.Request) Diagnosis {
+	values, exists := req.Header[m.name]
+	var actual string
+	if exists && len(values) > 0 {
+		actual = values[0]
+	}
+
+	d := Diagnosis{
+		Dimension: "header:" + m.name,
+		MaxScore:  5,
+		Expected:  m.pattern,
+		Actual:    actual,
+	}
+
+	matched, score := m.ScoreMatch(req)
+	if matched {
+		d.Matched = true
+		d.Score = score
+		return d
+	}
+
+	switch {
+	case m.pattern == "!":
+		d.Reason = fmt.Sprintf("header %s should be absent but is %q", m.name, actual)
+	case !exists:
+		d.Reason = fmt.Sprintf("header %s missing", m.name)
+	case m.pattern == "*":
+		d.Reason = fmt.Sprintf("header %s value is empty", m.name)
+	case strings.HasPrefix(m.pattern, "~"):
+		d.Reason = fmt.Sprintf("header %s=%q does not match regex %s", m.name, actual, m.pattern[1:])
+	default:
+		d.Reason = fmt.Sprintf("header %s=%q does not equal %q", m.name, actual, m.pattern)
+	}
+	return d
+}

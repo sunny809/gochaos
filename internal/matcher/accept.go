@@ -133,3 +133,22 @@ func (m *AcceptMatcher) String() string {
 func (m *AcceptMatcher) MediaType() string {
 	return m.mediaType
 }
+
+// Diagnose returns a structured diagnosis for near-miss reporting.
+func (m *AcceptMatcher) Diagnose(req *http.Request) Diagnosis {
+	actual := req.Header.Get("Accept")
+	d := Diagnosis{
+		Dimension: "accept",
+		MaxScore:  7,
+		Expected:  m.mediaType,
+		Actual:    actual,
+	}
+	matched, score := m.ScoreMatch(req)
+	if matched {
+		d.Matched = true
+		d.Score = score
+		return d
+	}
+	d.Reason = fmt.Sprintf("Accept %q is not compatible with %s", actual, m.mediaType)
+	return d
+}

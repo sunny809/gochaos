@@ -52,7 +52,7 @@ The matching system is the most extension-friendly area. To add a new matcher:
        String() string
    }
    ```
-2. Add it to `internal/stub/matching.go` `buildMatcher` function.
+2. Add it to `internal/stub/matching.go` `BuildMatcher` function.
 3. Extend `internal/spec/spec.go` `RequestPattern` if you need new config fields.
 4. Add table-driven tests in `internal/matcher/<name>_test.go`.
 

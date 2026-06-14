@@ -1,6 +1,6 @@
 # gochaos
 
-> A Go-native HTTP mock server with built-in chaos engineering — embeddable in Go tests, runnable as a standalone CLI for CI/CD integration testing, resilience testing, and API mocking.
+> A lightweight HTTP mock server — runs anywhere, zero dependencies, WireMock-compatible API. Embeddable in Go tests, or run as a standalone CLI for **CI/CD integration testing, cross-language API mocking, and chaos engineering**.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/sunny809/gochaos.svg)](https://pkg.go.dev/github.com/sunny809/gochaos)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sunny809/gochaos)](https://goreportcard.com/report/github.com/sunny809/gochaos)
@@ -9,8 +9,23 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/release/sunny809/gochaos.svg)](https://github.com/sunny809/gochaos/releases/latest)
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go)](https://golang.org/doc/devel/release.html)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/sunny809/gochaos/pkgs/container/gochaos)
 
-`gochaos` is a lightweight HTTP/REST mock server inspired by [WireMock](https://wiremock.org/), built natively in Go. Unlike `gock` and `httpmock` which only intercept at the `http.RoundTripper` level, gochaos runs as a **real HTTP server** with a **REST admin API**, **response templating**, **request verification**, and **fault injection** — both as an embeddable Go library and a standalone CLI for any language team.
+`gochaos` is a lightweight HTTP/REST mock server inspired by [WireMock](https://wiremock.org/), built natively in Go. Unlike `gock` and `httpmock` which only intercept at the `http.RoundTripper` level, gochaos runs as a **real HTTP server** with a **REST admin API**, **response templating**, **request verification**, **near-miss diagnostics**, and **fault injection** — both as an embeddable Go library and a standalone CLI for **any language team**.
+
+## Comparison
+
+| Feature | gochaos | gock / httpmock | WireMock |
+|---------|---------|-----------------|----------|
+| **Real HTTP server** | ✅ Yes | ❌ RoundTripper | ✅ Yes (JVM) |
+| **Standalone CLI / Docker** | ✅ Yes | ❌ Library only | ✅ Yes (JVM) |
+| **Embeddable in Go tests** | ✅ Yes | ✅ Yes | ❌ JVM only |
+| **REST admin API** | ✅ Yes | ❌ No | ✅ Yes |
+| **Near-miss diagnostics** | ✅ Yes | ❌ No | ✅ Yes |
+| **Fault injection** | ✅ Yes | ❌ No | ❌ Limited |
+| **Callback/Webhook** | 🔜 Planned | ❌ No | ✅ Yes |
+| **Startup time** | ~5ms | ~1ms | ~2-5s |
+| **Memory** | ~10MB | ~5MB | ~200-500MB |
 
 ## Installation
 
@@ -240,18 +255,86 @@ server := gmock.NewServer(gmock.WithGzip(false))
 | `DELETE` | `/__admin/requests` | Clear request log |
 | `GET` | `/__admin/health` | Health check |
 
+## Documentation
+
+| For | Document |
+|-----|----------|
+| 🚀 **Getting Started** | [Feature Overview](docs/features/getting-started.md) |
+| 📖 **CLI Reference** | [docs/cli.md](docs/cli.md) — all commands and flags |
+| 🌐 **Admin API** | [docs/admin-api.md](docs/admin-api.md) — REST API with curl examples |
+| 🎯 **Stub Matching** | [Feature Guide](docs/features/stub-matching.md) — 8 matching dimensions |
+| ⏱️ **Response Delays** | [Feature Guide](docs/features/response-delays.md) — fixed and random delays |
+| 💥 **Fault Injection** | [Feature Guide](docs/features/fault-injection.md) — error, empty, connection reset |
+| 🔄 **Response Templating** | [Feature Guide](docs/features/response-templating.md) — dynamic responses |
+| 🌍 **CORS** | [Feature Guide](docs/features/cors.md) — cross-origin support |
+| ✅ **Verification** | [Feature Guide](docs/features/verification.md) — request assertions |
+| 📦 **YAML/JSON Stubs** | [Feature Guide](docs/features/yaml-stubs.md) — file-based stubs |
+| 🔐 **Gzip** | [Feature Guide](docs/features/gzip-compression.md) — compression support |
+| 🧪 **Examples** | [examples/](examples/) — runnable Go examples |
+| 🚀 **CI/CD** | [docs/ci-integration.md](docs/ci-integration.md) — GitHub Actions, GitLab CI, Jenkins |
+
+## CI/CD & Cross-Language Usage
+
+`gochaos` is uniquely suited for CI/CD pipelines because of its minimal resource footprint:
+
+| Metric | gochaos | WireMock (JVM) | Benefit for CI |
+|--------|---------|----------------|----------------|
+| Startup time | ~5ms | ~2-5s | Pipeline starts faster |
+| Memory | ~10MB | ~200-500MB | Run more parallel jobs |
+| Image size | ~15MB (scratch) | ~200MB+ (JDK) | Pull in < 1s |
+| Dependencies | None (single binary) | JDK 17+ | No runtime to install |
+
+### Use from any language
+
+```bash
+# Start with Docker (no Go installation needed)
+docker run --rm -p 8080:8080 ghcr.io/sunny809/gochaos:latest --stubs ./stubs.yaml
+
+# Manage via REST API (from any language)
+curl -s http://localhost:8080/__admin/health | jq .
+curl -X POST http://localhost:8080/__admin/mappings \
+  -H 'Content-Type: application/json' \
+  -d '{"request":{"method":"GET","urlPath":"/api/health"},"response":{"status":200,"body":"{\"status\":\"ok\"}"}}'
+
+# Verify requests
+curl http://localhost:8080/__admin/requests | jq .
+```
+
+### CI examples
+
+**GitHub Actions** — [See full guide](docs/ci-integration.md):
+```yaml
+services:
+  gochaos:
+    image: ghcr.io/sunny809/gochaos:latest
+    ports: ["8080:8080"]
+```
+
+**GitLab CI**:
+```yaml
+services:
+  - name: ghcr.io/sunny809/gochaos:latest
+    alias: mock-server
+```
+
+**Jenkins** — [See full guide](docs/ci-integration.md)
+
+---
+
 ## Features
 
 - Concurrent-safe stub registry with priority-ordered matching
 - 8-dimensional request matching (method, path, headers, query, body, cookies, accept)
 - Response templating with `text/template` (`{{.Request.Method}}`, `{{randomUUID}}`, `{{randomInt}}`, `{{now}}`)
 - Fixed and random response delay injection
+- Fault injection: `error` (500), `empty` (no body), `connection_reset` (TCP RST)
 - Binary response body (base64)
 - Redirect response helper
 - CORS support (preflight + actual requests)
 - Gzip response compression
-- Request logging with ring buffer
+- Request logging with ring buffer (default 1000 entries)
 - Request verification API (Verify, VerifyNotCalled)
+- Near-miss diagnostics (unmatched request → closest stub + per-dimension why)
 - YAML/JSON stub file loading
 
 ## Building & Testing

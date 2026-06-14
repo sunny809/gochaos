@@ -44,6 +44,33 @@ func (m *BodyExactMatcher) String() string {
 	return "body exact match"
 }
 
+// Diagnose returns a structured diagnosis for near-miss reporting.
+//
+// Note on Actual: body content is intentionally truncated to truncateBodyLen
+// characters to keep diagnostics small and avoid pulling large request
+// payloads into result structs. readBody restores req.Body before returning,
+// so subsequent handlers/matchers can re-read it.
+func (m *BodyExactMatcher) Diagnose(req *http.Request) Diagnosis {
+	body, err := readBody(req)
+	d := Diagnosis{
+		Dimension: "body",
+		MaxScore:  20,
+		Expected:  truncateBody(m.body),
+	}
+	if err != nil {
+		d.Reason = fmt.Sprintf("could not read body: %v", err)
+		return d
+	}
+	d.Actual = truncateBody(body)
+	if body == m.body {
+		d.Matched = true
+		d.Score = 20
+		return d
+	}
+	d.Reason = "body does not equal expected exact value"
+	return d
+}
+
 // ---
 
 // BodyRegexMatcher matches the request body against a regular expression.
@@ -82,6 +109,29 @@ func (m *BodyRegexMatcher) ScoreMatch(req *http.Request) (bool, int) {
 // String returns a description of this matcher.
 func (m *BodyRegexMatcher) String() string {
 	return fmt.Sprintf("body regex=%s", m.raw)
+}
+
+// Diagnose returns a structured diagnosis for near-miss reporting.
+// See BodyExactMatcher.Diagnose for the body-truncation rationale.
+func (m *BodyRegexMatcher) Diagnose(req *http.Request) Diagnosis {
+	body, err := readBody(req)
+	d := Diagnosis{
+		Dimension: "body",
+		MaxScore:  10,
+		Expected:  m.raw,
+	}
+	if err != nil {
+		d.Reason = fmt.Sprintf("could not read body: %v", err)
+		return d
+	}
+	d.Actual = truncateBody(body)
+	if m.pattern.MatchString(body) {
+		d.Matched = true
+		d.Score = 10
+		return d
+	}
+	d.Reason = fmt.Sprintf("body does not match regex %s", m.raw)
+	return d
 }
 
 // ---
@@ -147,6 +197,64 @@ func (m *BodyJSONPathMatcher) String() string {
 	return fmt.Sprintf("body jsonpath=%s", m.path)
 }
 
+// Diagnose returns a structured diagnosis for near-miss reporting.
+// See BodyExactMatcher.Diagnose for the body-truncation rationale.
+func (m *BodyJSONPathMatcher) Diagnose(req *http.Request) Diagnosis {
+	body, err := readBody(req)
+	d := Diagnosis{
+		Dimension: "body",
+		MaxScore:  12,
+		Expected:  m.path,
+	}
+	if err != nil {
+		d.Reason = fmt.Sprintf("could not read body: %v", err)
+		return d
+	}
+	d.Actual = truncateBody(body)
+
+	if body == "" {
+		d.Reason = "body is empty"
+		return d
+	}
+
+	var data interface{}
+	if err := json.Unmarshal([]byte(body), &data); err != nil {
+		d.Reason = fmt.Sprintf("body is not valid JSON: %v", err)
+		return d
+	}
+
+	result, err := jsonpath.Get(m.path, data)
+	if err != nil {
+		d.Reason = fmt.Sprintf("jsonpath %s did not resolve: %v", m.path, err)
+		return d
+	}
+
+	switch v := result.(type) {
+	case nil:
+		d.Reason = fmt.Sprintf("jsonpath %s resolved to nil", m.path)
+		return d
+	case string:
+		if v == "" {
+			d.Reason = fmt.Sprintf("jsonpath %s resolved to empty string", m.path)
+			return d
+		}
+	case []interface{}:
+		if len(v) == 0 {
+			d.Reason = fmt.Sprintf("jsonpath %s resolved to empty array", m.path)
+			return d
+		}
+	case map[string]interface{}:
+		if len(v) == 0 {
+			d.Reason = fmt.Sprintf("jsonpath %s resolved to empty object", m.path)
+			return d
+		}
+	}
+
+	d.Matched = true
+	d.Score = 12
+	return d
+}
+
 // readBody reads the full request body and restores it for subsequent handlers.
 func readBody(req *http.Request) (string, error) {
 	if req.Body == nil {
@@ -160,4 +268,24 @@ func readBody(req *http.Request) (string, error) {
 	// Restore the body so it can be read again
 	req.Body = io.NopCloser(strings.NewReader(string(body)))
 	return string(body), nil
+}
+
+// truncateBodyLen is the maximum number of body characters retained in a
+// Diagnosis.Expected/Actual field. The cap keeps near-miss results bounded
+// regardless of upstream payload size — body diffs are diagnostic hints, not
+// audit trails.
+const truncateBodyLen = 80
+
+// truncateBody returns s as-is if it fits in truncateBodyLen, or the first
+// truncateBodyLen characters followed by "…" otherwise. Operates on runes so
+// it does not slice mid-UTF-8.
+func truncateBody(s string) string {
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= truncateBodyLen {
+		return s
+	}
+	return string(runes[:truncateBodyLen]) + "…"
 }

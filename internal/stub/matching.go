@@ -34,7 +34,7 @@ func (e *Engine) Match(req *http.Request) *spec.MatchResult {
 	var bestMatch *spec.MatchResult
 
 	for _, rec := range records {
-		composite := buildMatcher(rec.Definition.Request)
+		composite := BuildMatcher(rec.Definition.Request)
 		matched, score := composite.ScoreMatch(req)
 
 		if matched {
@@ -61,7 +61,7 @@ func (e *Engine) MatchWithScore(req *http.Request) []spec.MatchResult {
 	results := make([]spec.MatchResult, 0, len(records))
 
 	for _, rec := range records {
-		composite := buildMatcher(rec.Definition.Request)
+		composite := BuildMatcher(rec.Definition.Request)
 		matched, score := composite.ScoreMatch(req)
 
 		def := rec.Definition
@@ -84,8 +84,10 @@ func (e *Engine) MatchWithScore(req *http.Request) []spec.MatchResult {
 	return results
 }
 
-// buildMatcher creates a CompositeMatcher from a RequestPattern.
-func buildMatcher(pattern spec.RequestPattern) *matcher.CompositeMatcher {
+// BuildMatcher creates a CompositeMatcher from a RequestPattern.
+// It is exported so the near-miss engine in internal/nearmiss can reuse the
+// same composition logic used by primary matching.
+func BuildMatcher(pattern spec.RequestPattern) *matcher.CompositeMatcher {
 	var matchers []matcher.Matcher
 
 	// Method

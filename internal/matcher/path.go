@@ -39,6 +39,24 @@ func (m *PathExactMatcher) Path() string {
 	return m.path
 }
 
+// Diagnose returns a structured diagnosis for near-miss reporting.
+func (m *PathExactMatcher) Diagnose(req *http.Request) Diagnosis {
+	actual := req.URL.Path
+	d := Diagnosis{
+		Dimension: "path",
+		MaxScore:  30,
+		Expected:  m.path,
+		Actual:    actual,
+	}
+	if actual == m.path {
+		d.Matched = true
+		d.Score = 30
+		return d
+	}
+	d.Reason = fmt.Sprintf("path %s does not equal %s", actual, m.path)
+	return d
+}
+
 // ---
 
 // PathRegexMatcher matches the request URL path against a regular expression.
@@ -87,4 +105,22 @@ func (m *PathRegexMatcher) String() string {
 // Raw returns the raw regex pattern string.
 func (m *PathRegexMatcher) Raw() string {
 	return m.raw
+}
+
+// Diagnose returns a structured diagnosis for near-miss reporting.
+func (m *PathRegexMatcher) Diagnose(req *http.Request) Diagnosis {
+	actual := req.URL.Path
+	d := Diagnosis{
+		Dimension: "path",
+		MaxScore:  15,
+		Expected:  m.raw,
+		Actual:    actual,
+	}
+	if m.pattern.MatchString(actual) {
+		d.Matched = true
+		d.Score = 15
+		return d
+	}
+	d.Reason = fmt.Sprintf("path %s does not match regex %s", actual, m.raw)
+	return d
 }

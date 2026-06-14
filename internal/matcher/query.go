@@ -97,3 +97,40 @@ func (m *QueryParamMatcher) Key() string {
 func (m *QueryParamMatcher) Pattern() string {
 	return m.pattern
 }
+
+// Diagnose returns a structured diagnosis for near-miss reporting.
+func (m *QueryParamMatcher) Diagnose(req *http.Request) Diagnosis {
+	values := req.URL.Query()[m.key]
+	var actual string
+	if len(values) > 0 {
+		actual = values[0]
+	}
+
+	d := Diagnosis{
+		Dimension: "query:" + m.key,
+		MaxScore:  3,
+		Expected:  m.pattern,
+		Actual:    actual,
+	}
+
+	matched, score := m.ScoreMatch(req)
+	if matched {
+		d.Matched = true
+		d.Score = score
+		return d
+	}
+
+	switch {
+	case m.pattern == "!":
+		d.Reason = fmt.Sprintf("query %s should be absent", m.key)
+	case len(values) == 0:
+		d.Reason = fmt.Sprintf("query %s missing", m.key)
+	case m.pattern == "*":
+		d.Reason = fmt.Sprintf("query %s value is empty", m.key)
+	case strings.HasPrefix(m.pattern, "~"):
+		d.Reason = fmt.Sprintf("query %s=%q does not match regex %s", m.key, actual, m.pattern[1:])
+	default:
+		d.Reason = fmt.Sprintf("query %s=%q does not equal %q", m.key, actual, m.pattern)
+	}
+	return d
+}
