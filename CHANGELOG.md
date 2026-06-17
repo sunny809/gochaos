@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Implemented near-miss diagnostics engine (engine-only; admin endpoint pending in N2).
 
+- **P0: Near-miss admin endpoint + 404 surface** — `POST /__admin/nearmiss` endpoint
+  accepts a JSON body (`method`, `path`, `headers`, `body`) and returns per-stub
+  diagnostic breakdowns for stubs that nearly matched. 404 responses now embed a
+  `nearMisses` array with stub ID, name, score, maxScore, and topMissReason so
+  clients can see *which* stubs were close and *why* without calling the admin
+  endpoint. 9 unit tests + 9 integration tests (with 3 bad-request subtests)
+  cover all mismatch dimensions, edge cases, and error handling.
+
 - **Response templating** — `internal/templating/engine.go` with text/template-based
   response body rendering. Supports custom template functions (`request`, `randomInt`,
   `randomUUID`, `now`, `base64`). 100% test coverage.

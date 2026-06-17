@@ -1,11 +1,9 @@
 package gmock
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -21,6 +19,7 @@ import (
 	internallog "github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
 	"github.com/sunny809/gochaos/internal/response"
+	"github.com/sunny809/gochaos/internal/spec"
 	"github.com/sunny809/gochaos/internal/stub"
 )
 
@@ -116,7 +115,7 @@ func NewServer(opts ...Option) Server {
 		matchEngine:    stub.NewEngine(registry),
 		nearMissEngine: nearmiss.NewEngine(),
 		requestLog:     requestLog,
-		adminHandler:   admin.New(registry, requestLog),
+		adminHandler:   admin.New(registry, requestLog, nearmiss.NewEngine()),
 		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip),
 	}
 }
@@ -379,7 +378,31 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// writeNoMatch writes a 404 with diagnostic information.
+// nearMissSummary is the slim projection of a near-miss entry embedded in the
+// 404 response body. The full breakdown is intentionally omitted here to keep
+// the 404 payload small — clients that want full diagnostics should call the
+// admin endpoint POST /__admin/nearmiss instead.
+type nearMissSummary struct {
+	StubID        string `json:"stubId"`
+	StubName      string `json:"stubName,omitempty"`
+	Score         int    `json:"score"`
+	MaxScore      int    `json:"maxScore"`
+	TopMissReason string `json:"topMissReason"`
+}
+
+// noMatchBody is the JSON shape returned to clients when no stub matches.
+// Field tags use lowerCamelCase to match the rest of the public API surface.
+type noMatchBody struct {
+	Error      string            `json:"error"`
+	Method     string            `json:"method"`
+	Path       string            `json:"path"`
+	NearMisses []nearMissSummary `json:"nearMisses"`
+}
+
+// writeNoMatch writes a 404 with diagnostic information including near-miss
+// summaries derived from the request and the current stub registry. The
+// response body always includes a non-nil nearMisses array (possibly empty),
+// so clients can decode the field unconditionally.
 func (s *mockServer) writeNoMatch(w http.ResponseWriter, r *http.Request) {
 	// Apply CORS headers if enabled (for unmatched requests too)
 	s.responseWriter.WriteCORSHeaders(w, r, corsOptsFromConfig(s.config.CORSOptions))
@@ -387,19 +410,45 @@ func (s *mockServer) writeNoMatch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
 
-	body := map[string]interface{}{
-		"error":  "no stub matched",
-		"method": r.Method,
-		"path":   r.URL.Path,
+	// Compute near-miss diagnostics using the server's engine. The engine
+	// already applies topN truncation and stable ordering, so we forward
+	// its output directly into the slim projection below.
+	results := s.nearMissEngine.Compute(r, s.registry.List())
+
+	summaries := make([]nearMissSummary, 0, len(results))
+	for _, nm := range results {
+		summaries = append(summaries, nearMissSummary{
+			StubID:        nm.StubID,
+			StubName:      nm.StubName,
+			Score:         nm.Score,
+			MaxScore:      nm.MaxScore,
+			TopMissReason: firstMissReason(nm.Breakdown),
+		})
 	}
 
-	if r.URL.RawQuery != "" {
-		body["query"] = r.URL.RawQuery
+	body := noMatchBody{
+		Error:      "no matching stub",
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		NearMisses: summaries,
 	}
 
-	buf := &bytes.Buffer{}
-	_ = json.NewEncoder(buf).Encode(body)
-	_, _ = io.Copy(w, buf)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		s.logger.Warn("failed to encode no-match body", "error", err)
+	}
+}
+
+// firstMissReason returns the Reason of the first DimensionScore that did not
+// match. Defensive: if the breakdown is empty or every dimension matched (which
+// shouldn't happen because the engine omits fully matching stubs), it returns
+// the empty string.
+func firstMissReason(breakdown []spec.DimensionScore) string {
+	for _, d := range breakdown {
+		if !d.Matched {
+			return d.Reason
+		}
+	}
+	return ""
 }
 
 // writeCORSHeaders writes CORS headers for a preflight OPTIONS response.
