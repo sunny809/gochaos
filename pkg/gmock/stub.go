@@ -43,6 +43,12 @@ type ResponseDefinition = spec.ResponseDefinition
 // FaultDefinition describes a network-level fault to simulate.
 type FaultDefinition = spec.FaultDefinition
 
+// Activation controls when a fault is triggered.
+type Activation = spec.Activation
+
+// TimeWindow defines a time range during which a fault is active.
+type TimeWindow = spec.TimeWindow
+
 // DelayDefinition describes a simulated response delay.
 type DelayDefinition = spec.DelayDefinition
 

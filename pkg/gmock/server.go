@@ -12,12 +12,14 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/PaesslerAG/jsonpath"
 	"github.com/sunny809/gochaos/config"
 	"github.com/sunny809/gochaos/internal/admin"
 	internallog "github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
+	"github.com/sunny809/gochaos/internal/randx"
 	"github.com/sunny809/gochaos/internal/response"
 	"github.com/sunny809/gochaos/internal/spec"
 	"github.com/sunny809/gochaos/internal/stub"
@@ -90,6 +92,8 @@ type mockServer struct {
 	requestLog     *internallog.RequestLog
 	adminHandler   *admin.Handler
 	responseWriter response.Writer
+	globalRand     randx.RNG
+	startTime      time.Time
 }
 
 // NewServer creates a new gmock server with the given options.
@@ -107,6 +111,7 @@ func NewServer(opts ...Option) Server {
 
 	registry := stub.NewRegistry()
 	requestLog := internallog.New(cfg.MaxRequests)
+	globalRand := randx.NewGlobal(cfg.RandSeed)
 
 	return &mockServer{
 		config:         cfg,
@@ -116,7 +121,8 @@ func NewServer(opts ...Option) Server {
 		nearMissEngine: nearmiss.NewEngine(),
 		requestLog:     requestLog,
 		adminHandler:   admin.New(registry, requestLog, nearmiss.NewEngine()),
-		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip),
+		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip, globalRand),
+		globalRand:     globalRand,
 	}
 }
 
@@ -135,6 +141,12 @@ func (s *mockServer) Start() error {
 		return fmt.Errorf("gmock: failed to listen on %s: %w", addr, err)
 	}
 	s.listener = listener
+
+	// Record server start time for time-window activation (A3).
+	// This is set after the listener is bound so that time-window
+	// calculations are relative to when the server actually started
+	// serving traffic.
+	s.startTime = time.Now()
 
 	// Determine if admin runs on a separate port
 	useSeparateAdminPort := s.config.AdminPort > 0
@@ -372,10 +384,48 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Increment the stub's hit count before writing the response.
+	// The returned value is the new count after increment; this is passed
+	// to WriteResponse so that the everyNthRequest activation mode (A2)
+	// can decide whether the fault should fire on this request.
+	hitCount := s.registry.IncrementHitCount(result.Stub.ID)
+
+	// A10: Rate-limit check. When the stub has a "rate_limit" fault type,
+	// check the token bucket before writing the normal response. If the
+	// request is rate-limited, write a 429/503 response immediately and
+	// skip the normal WriteResponse path.
+	if result.Stub.Response.Fault != nil && result.Stub.Response.Fault.Type == "rate_limit" {
+		fault := result.Stub.Response.Fault
+		if s.registry.ShouldRateLimit(result.Stub.ID, fault.AfterRequests, fault.PerSecond) {
+			s.writeRateLimited(w, r, fault)
+			return
+		}
+	}
+
 	// Write the matched response (with optional gzip compression)
-	if err := s.responseWriter.WriteResponse(w, result.Stub, r, corsOptsFromConfig(s.config.CORSOptions)); err != nil {
+	if err := s.responseWriter.WriteResponse(w, result.Stub, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.startTime); err != nil {
 		s.logger.Warn("failed to write response", "stub", result.Stub.ID, "error", err)
 	}
+}
+
+// writeRateLimited writes a rate-limit response when the token bucket is empty.
+// The status code defaults to 429 (Too Many Requests) unless RateLimitStatus
+// is explicitly set on the fault definition. The response body includes a
+// Retry-After header set to 1 second (the minimum refill interval).
+func (s *mockServer) writeRateLimited(w http.ResponseWriter, r *http.Request, fault *spec.FaultDefinition) {
+	s.responseWriter.WriteCORSHeaders(w, r, corsOptsFromConfig(s.config.CORSOptions))
+
+	status := fault.RateLimitStatus
+	if status <= 0 {
+		status = http.StatusTooManyRequests // 429
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", "1")
+	w.WriteHeader(status)
+
+	body := fmt.Sprintf(`{"error":"rate limited","fault":"rate_limit","retryAfter":1}`)
+	_, _ = w.Write([]byte(body))
 }
 
 // nearMissSummary is the slim projection of a near-miss entry embedded in the

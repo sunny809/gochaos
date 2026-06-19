@@ -1409,3 +1409,151 @@ func TestFaultNoGzip(t *testing.T) {
 		t.Errorf("expected plain JSON fault body, got %s", string(body))
 	}
 }
+
+func TestRateLimit_Default429(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/ratelimited",
+		},
+		Response: gmock.ResponseDefinition{
+			Status: 200,
+			Body:   `{"ok":true}`,
+			Fault: &gmock.FaultDefinition{
+				Type:         "rate_limit",
+				PerSecond:    2,
+			},
+		},
+	})
+
+	// First 2 requests should succeed (full bucket = 2 tokens).
+	for i := 0; i < 2; i++ {
+		resp, err := http.Get(server.URL() + "/api/ratelimited")
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i+1, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("request %d: expected 200, got %d", i+1, resp.StatusCode)
+		}
+	}
+
+	// Third request should be rate-limited with default 429.
+	resp, err := http.Get(server.URL() + "/api/ratelimited")
+	if err != nil {
+		t.Fatalf("rate-limited request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", resp.StatusCode)
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
+	if !strings.Contains(body, `"fault":"rate_limit"`) {
+		t.Errorf("expected rate_limit fault in body, got %s", body)
+	}
+	if !strings.Contains(body, `"error":"rate limited"`) {
+		t.Errorf("expected 'rate limited' error in body, got %s", body)
+	}
+	if resp.Header.Get("Retry-After") != "1" {
+		t.Errorf("expected Retry-After: 1, got %q", resp.Header.Get("Retry-After"))
+	}
+}
+
+func TestRateLimit_CustomStatus(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/ratelimited503",
+		},
+		Response: gmock.ResponseDefinition{
+			Status: 200,
+			Body:   `{"ok":true}`,
+			Fault: &gmock.FaultDefinition{
+				Type:           "rate_limit",
+				PerSecond:      1,
+				RateLimitStatus: 503,
+			},
+		},
+	})
+
+	// First request should succeed.
+	resp, err := http.Get(server.URL() + "/api/ratelimited503")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// Second request should be rate-limited with custom 503.
+	resp, err = http.Get(server.URL() + "/api/ratelimited503")
+	if err != nil {
+		t.Fatalf("rate-limited request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestRateLimit_AfterRequests(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/warmup",
+		},
+		Response: gmock.ResponseDefinition{
+			Status: 200,
+			Body:   `{"ok":true}`,
+			Fault: &gmock.FaultDefinition{
+				Type:          "rate_limit",
+				AfterRequests: 3,
+				PerSecond:     1,
+			},
+		},
+	})
+
+	// First 3 requests should succeed (warm-up phase).
+	for i := 0; i < 3; i++ {
+		resp, err := http.Get(server.URL() + "/api/warmup")
+		if err != nil {
+			t.Fatalf("warm-up request %d failed: %v", i+1, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("warm-up request %d: expected 200, got %d", i+1, resp.StatusCode)
+		}
+	}
+
+	// 4th request should succeed (1 token in bucket).
+	resp, err := http.Get(server.URL() + "/api/warmup")
+	if err != nil {
+		t.Fatalf("first post-warmup request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("first post-warmup request: expected 200, got %d", resp.StatusCode)
+	}
+
+	// 5th request should be rate-limited.
+	resp, err = http.Get(server.URL() + "/api/warmup")
+	if err != nil {
+		t.Fatalf("rate-limited request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", resp.StatusCode)
+	}
+}
