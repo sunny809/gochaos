@@ -2,6 +2,8 @@
 
 > A lightweight HTTP mock server — runs anywhere, zero dependencies, WireMock-compatible API. Embeddable in Go tests, or run as a standalone CLI for **CI/CD integration testing, cross-language API mocking, and chaos engineering**.
 
+**Project naming**: `gochaos` is the Go module and repository name. `gmock` is the CLI binary name. The public Go package is imported as `github.com/sunny809/gochaos/pkg/gmock`.
+
 [![Go Reference](https://pkg.go.dev/badge/github.com/sunny809/gochaos.svg)](https://pkg.go.dev/github.com/sunny809/gochaos)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sunny809/gochaos)](https://goreportcard.com/report/github.com/sunny809/gochaos)
 [![CI](https://github.com/sunny809/gochaos/actions/workflows/ci.yml/badge.svg)](https://github.com/sunny809/gochaos/actions/workflows/ci.yml)
@@ -283,7 +285,7 @@ server := gmock.NewServer(gmock.WithGzip(false))
 | 📦 **YAML/JSON Stubs** | [Feature Guide](docs/features/yaml-stubs.md) — file-based stubs |
 | 🔐 **Gzip** | [Feature Guide](docs/features/gzip-compression.md) — compression support |
 | 🧪 **Examples** | [examples/](examples/) — runnable Go examples |
-| 🚀 **CI/CD** | [docs/ci-integration.md](docs/ci-integration.md) — GitHub Actions, GitLab CI, Jenkins |
+| 🚀 **CI/CD** | See CI/CD section below — GitHub Actions, GitLab CI, Jenkins |
 
 ## CI/CD & Cross-Language Usage
 
@@ -314,7 +316,7 @@ curl http://localhost:8080/__admin/requests | jq .
 
 ### CI examples
 
-**GitHub Actions** — [See full guide](docs/ci-integration.md):
+**GitHub Actions**:
 ```yaml
 services:
   gochaos:
@@ -329,7 +331,7 @@ services:
     alias: mock-server
 ```
 
-**Jenkins** — [See full guide](docs/ci-integration.md)
+**Jenkins**:
 
 ---
 

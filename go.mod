@@ -1,6 +1,6 @@
 module github.com/sunny809/gochaos
 
-go 1.25.0
+go 1.22
 
 require (
 	github.com/PaesslerAG/jsonpath v0.1.1

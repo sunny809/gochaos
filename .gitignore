@@ -24,3 +24,12 @@ CLAUDE.md
 # Internal development docs (not for public repo)
 docs/
 .github/README.md
+
+# Tutorial binary (built locally)
+05-fault-injection
+
+# Example binaries
+examples/basic/basic
+examples/cors/cors
+examples/delay/delay
+examples/library/library

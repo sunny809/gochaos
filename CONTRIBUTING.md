@@ -1,14 +1,16 @@
-# Contributing to gmock
+# Contributing to gochaos
 
-Thanks for your interest in contributing to gmock!
+Thanks for your interest in contributing to gochaos!
 
 ## Getting Started
 
 ```bash
 git clone https://github.com/sunny809/gochaos
-cd gmock
+cd gochaos
 go test -race ./...
 ```
+
+> **Note**: The project is named `gochaos` (repository/module name), while `gmock` is the CLI binary name. The Go package is imported as `github.com/sunny809/gochaos/pkg/gmock`.
 
 Requires Go 1.22 or newer (we use the enhanced `net/http.ServeMux` pattern matching).
 
