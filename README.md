@@ -169,7 +169,7 @@ Priority can be set via `priority: 1` on a stub (lower = higher precedence).
 
 ### Response Delays
 
-Simulate network latency with fixed or random delays:
+Simulate network latency with fixed, random, lognormal, timeout, or dribble delays:
 
 ```yaml
 response:
@@ -178,6 +178,17 @@ response:
   delay:
     type: fixed
     value: 2000  # 2 seconds
+```
+
+```yaml
+response:
+  status: 200
+  body: '{"realistic": true}'
+  delay:
+    type: lognormal
+    p50: 50
+    p95: 200
+    p99: 500
 ```
 
 ```go
@@ -265,6 +276,7 @@ server := gmock.NewServer(gmock.WithGzip(false))
 | 🎯 **Stub Matching** | [Feature Guide](docs/features/stub-matching.md) — 8 matching dimensions |
 | ⏱️ **Response Delays** | [Feature Guide](docs/features/response-delays.md) — fixed and random delays |
 | 💥 **Fault Injection** | [Feature Guide](docs/features/fault-injection.md) — error, empty, connection reset |
+| 🔥 **Advanced Chaos** | [Feature Guide](docs/features/advanced-chaos.md) — 7 fault types, 5 delay distributions, activation modes, seedable RNG |
 | 🔄 **Response Templating** | [Feature Guide](docs/features/response-templating.md) — dynamic responses |
 | 🌍 **CORS** | [Feature Guide](docs/features/cors.md) — cross-origin support |
 | ✅ **Verification** | [Feature Guide](docs/features/verification.md) — request assertions |
@@ -326,15 +338,17 @@ services:
 - Concurrent-safe stub registry with priority-ordered matching
 - 8-dimensional request matching (method, path, headers, query, body, cookies, accept)
 - Response templating with `text/template` (`{{.Request.Method}}`, `{{randomUUID}}`, `{{randomInt}}`, `{{now}}`)
-- Fixed and random response delay injection
-- Fault injection: `error` (500), `empty` (no body), `connection_reset` (TCP RST)
+- **7 fault injection types**: `error` (500), `empty` (0-byte), `connection_reset` (TCP RST), `malformed` (invalid HTTP), `random_data` (garbage bytes + close), `slow_close` (delayed FIN), `rate_limit` (token bucket + 429/503)
+- **5 delay distributions**: `fixed`, `random`, `timeout` (infinite hang), `lognormal` (p50/p95/p99 parameterized), `dribble` (chunked body with inter-chunk delays)
+- **3 activation modes** (AND semantics): `probability` (0.0--1.0), `everyNthRequest`, `activeBetween` (time windows with per-window probability override)
+- **Seedable RNG**: `WithRandSeed(42)` makes all chaos behavior reproducible across runs
 - Binary response body (base64)
 - Redirect response helper
 - CORS support (preflight + actual requests)
 - Gzip response compression
 - Request logging with ring buffer (default 1000 entries)
 - Request verification API (Verify, VerifyNotCalled)
-- Near-miss diagnostics (unmatched request → closest stub + per-dimension why)
+- Near-miss diagnostics (unmatched request -> closest stub + per-dimension why)
 - YAML/JSON stub file loading
 
 ## Building & Testing

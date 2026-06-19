@@ -10,6 +10,7 @@
 //	DELETE /__admin/mappings       Delete all stubs
 //	GET    /__admin/mappings/{id}  Get a stub by ID
 //	DELETE /__admin/mappings/{id}  Delete a stub by ID
+//	POST   /__admin/nearmiss       Near-miss diagnostics
 //	POST   /__admin/reset          Reset all server state
 //	GET    /__admin/requests       List logged requests
 //	DELETE /__admin/requests       Clear request log
@@ -22,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/sunny809/gochaos/internal/log"
+	"github.com/sunny809/gochaos/internal/nearmiss"
 	"github.com/sunny809/gochaos/internal/stub"
 )
 
@@ -30,16 +32,18 @@ const Prefix = "/__admin/"
 
 // Handler implements the admin API HTTP handler.
 type Handler struct {
-	registry   *stub.Registry
-	requestLog *log.RequestLog
-	resetFns   []func() // additional reset hooks (scenarios, proxy, etc.)
+	registry       *stub.Registry
+	requestLog     *log.RequestLog
+	nearMissEngine *nearmiss.Engine
+	resetFns       []func() // additional reset hooks (scenarios, proxy, etc.)
 }
 
-// New creates an admin Handler bound to the given registry and request log.
-func New(registry *stub.Registry, requestLog *log.RequestLog) *Handler {
+// New creates an admin Handler bound to the given registry, request log, and near-miss engine.
+func New(registry *stub.Registry, requestLog *log.RequestLog, nearMissEngine *nearmiss.Engine) *Handler {
 	return &Handler{
-		registry:   registry,
-		requestLog: requestLog,
+		registry:       registry,
+		requestLog:     requestLog,
+		nearMissEngine: nearMissEngine,
 	}
 }
 
@@ -89,6 +93,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.reset(w, r)
+
+	case path == Prefix+"nearmiss":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		h.nearMiss(w, r)
 
 	case path == Prefix+"requests":
 		switch r.Method {

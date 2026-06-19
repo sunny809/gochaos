@@ -1,11 +1,9 @@
 package gmock
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,13 +12,16 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/PaesslerAG/jsonpath"
 	"github.com/sunny809/gochaos/config"
 	"github.com/sunny809/gochaos/internal/admin"
 	internallog "github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
+	"github.com/sunny809/gochaos/internal/randx"
 	"github.com/sunny809/gochaos/internal/response"
+	"github.com/sunny809/gochaos/internal/spec"
 	"github.com/sunny809/gochaos/internal/stub"
 )
 
@@ -91,6 +92,8 @@ type mockServer struct {
 	requestLog     *internallog.RequestLog
 	adminHandler   *admin.Handler
 	responseWriter response.Writer
+	globalRand     randx.RNG
+	startTime      time.Time
 }
 
 // NewServer creates a new gmock server with the given options.
@@ -108,6 +111,7 @@ func NewServer(opts ...Option) Server {
 
 	registry := stub.NewRegistry()
 	requestLog := internallog.New(cfg.MaxRequests)
+	globalRand := randx.NewGlobal(cfg.RandSeed)
 
 	return &mockServer{
 		config:         cfg,
@@ -116,8 +120,9 @@ func NewServer(opts ...Option) Server {
 		matchEngine:    stub.NewEngine(registry),
 		nearMissEngine: nearmiss.NewEngine(),
 		requestLog:     requestLog,
-		adminHandler:   admin.New(registry, requestLog),
-		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip),
+		adminHandler:   admin.New(registry, requestLog, nearmiss.NewEngine()),
+		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip, globalRand),
+		globalRand:     globalRand,
 	}
 }
 
@@ -136,6 +141,12 @@ func (s *mockServer) Start() error {
 		return fmt.Errorf("gmock: failed to listen on %s: %w", addr, err)
 	}
 	s.listener = listener
+
+	// Record server start time for time-window activation (A3).
+	// This is set after the listener is bound so that time-window
+	// calculations are relative to when the server actually started
+	// serving traffic.
+	s.startTime = time.Now()
 
 	// Determine if admin runs on a separate port
 	useSeparateAdminPort := s.config.AdminPort > 0
@@ -373,13 +384,75 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Increment the stub's hit count before writing the response.
+	// The returned value is the new count after increment; this is passed
+	// to WriteResponse so that the everyNthRequest activation mode (A2)
+	// can decide whether the fault should fire on this request.
+	hitCount := s.registry.IncrementHitCount(result.Stub.ID)
+
+	// A10: Rate-limit check. When the stub has a "rate_limit" fault type,
+	// check the token bucket before writing the normal response. If the
+	// request is rate-limited, write a 429/503 response immediately and
+	// skip the normal WriteResponse path.
+	if result.Stub.Response.Fault != nil && result.Stub.Response.Fault.Type == "rate_limit" {
+		fault := result.Stub.Response.Fault
+		if s.registry.ShouldRateLimit(result.Stub.ID, fault.AfterRequests, fault.PerSecond) {
+			s.writeRateLimited(w, r, fault)
+			return
+		}
+	}
+
 	// Write the matched response (with optional gzip compression)
-	if err := s.responseWriter.WriteResponse(w, result.Stub, r, corsOptsFromConfig(s.config.CORSOptions)); err != nil {
+	if err := s.responseWriter.WriteResponse(w, result.Stub, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.startTime); err != nil {
 		s.logger.Warn("failed to write response", "stub", result.Stub.ID, "error", err)
 	}
 }
 
-// writeNoMatch writes a 404 with diagnostic information.
+// writeRateLimited writes a rate-limit response when the token bucket is empty.
+// The status code defaults to 429 (Too Many Requests) unless RateLimitStatus
+// is explicitly set on the fault definition. The response body includes a
+// Retry-After header set to 1 second (the minimum refill interval).
+func (s *mockServer) writeRateLimited(w http.ResponseWriter, r *http.Request, fault *spec.FaultDefinition) {
+	s.responseWriter.WriteCORSHeaders(w, r, corsOptsFromConfig(s.config.CORSOptions))
+
+	status := fault.RateLimitStatus
+	if status <= 0 {
+		status = http.StatusTooManyRequests // 429
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", "1")
+	w.WriteHeader(status)
+
+	body := fmt.Sprintf(`{"error":"rate limited","fault":"rate_limit","retryAfter":1}`)
+	_, _ = w.Write([]byte(body))
+}
+
+// nearMissSummary is the slim projection of a near-miss entry embedded in the
+// 404 response body. The full breakdown is intentionally omitted here to keep
+// the 404 payload small — clients that want full diagnostics should call the
+// admin endpoint POST /__admin/nearmiss instead.
+type nearMissSummary struct {
+	StubID        string `json:"stubId"`
+	StubName      string `json:"stubName,omitempty"`
+	Score         int    `json:"score"`
+	MaxScore      int    `json:"maxScore"`
+	TopMissReason string `json:"topMissReason"`
+}
+
+// noMatchBody is the JSON shape returned to clients when no stub matches.
+// Field tags use lowerCamelCase to match the rest of the public API surface.
+type noMatchBody struct {
+	Error      string            `json:"error"`
+	Method     string            `json:"method"`
+	Path       string            `json:"path"`
+	NearMisses []nearMissSummary `json:"nearMisses"`
+}
+
+// writeNoMatch writes a 404 with diagnostic information including near-miss
+// summaries derived from the request and the current stub registry. The
+// response body always includes a non-nil nearMisses array (possibly empty),
+// so clients can decode the field unconditionally.
 func (s *mockServer) writeNoMatch(w http.ResponseWriter, r *http.Request) {
 	// Apply CORS headers if enabled (for unmatched requests too)
 	s.responseWriter.WriteCORSHeaders(w, r, corsOptsFromConfig(s.config.CORSOptions))
@@ -387,19 +460,45 @@ func (s *mockServer) writeNoMatch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
 
-	body := map[string]interface{}{
-		"error":  "no stub matched",
-		"method": r.Method,
-		"path":   r.URL.Path,
+	// Compute near-miss diagnostics using the server's engine. The engine
+	// already applies topN truncation and stable ordering, so we forward
+	// its output directly into the slim projection below.
+	results := s.nearMissEngine.Compute(r, s.registry.List())
+
+	summaries := make([]nearMissSummary, 0, len(results))
+	for _, nm := range results {
+		summaries = append(summaries, nearMissSummary{
+			StubID:        nm.StubID,
+			StubName:      nm.StubName,
+			Score:         nm.Score,
+			MaxScore:      nm.MaxScore,
+			TopMissReason: firstMissReason(nm.Breakdown),
+		})
 	}
 
-	if r.URL.RawQuery != "" {
-		body["query"] = r.URL.RawQuery
+	body := noMatchBody{
+		Error:      "no matching stub",
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		NearMisses: summaries,
 	}
 
-	buf := &bytes.Buffer{}
-	_ = json.NewEncoder(buf).Encode(body)
-	_, _ = io.Copy(w, buf)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		s.logger.Warn("failed to encode no-match body", "error", err)
+	}
+}
+
+// firstMissReason returns the Reason of the first DimensionScore that did not
+// match. Defensive: if the breakdown is empty or every dimension matched (which
+// shouldn't happen because the engine omits fully matching stubs), it returns
+// the empty string.
+func firstMissReason(breakdown []spec.DimensionScore) string {
+	for _, d := range breakdown {
+		if !d.Matched {
+			return d.Reason
+		}
+	}
+	return ""
 }
 
 // writeCORSHeaders writes CORS headers for a preflight OPTIONS response.

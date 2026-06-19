@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sunny809/gochaos/internal/log"
+	"github.com/sunny809/gochaos/internal/nearmiss"
 	"github.com/sunny809/gochaos/internal/spec"
 	"github.com/sunny809/gochaos/internal/stub"
 )
@@ -15,7 +16,8 @@ import (
 func setupTest() (*Handler, *stub.Registry, *log.RequestLog) {
 	registry := stub.NewRegistry()
 	requestLog := log.New(100)
-	h := New(registry, requestLog)
+	engine := nearmiss.NewEngine()
+	h := New(registry, requestLog, engine)
 	return h, registry, requestLog
 }
 

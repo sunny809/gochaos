@@ -32,6 +32,9 @@ func WithTopN(n int) Option {
 	}
 }
 
+// TopN returns the configured topN limit. A value <= 0 means no limit.
+func (e *Engine) TopN() int { return e.topN }
+
 // NewEngine constructs a near-miss engine. The default topN is 5.
 func NewEngine(opts ...Option) *Engine {
 	e := &Engine{topN: defaultTopN}

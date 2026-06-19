@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -95,8 +96,13 @@ func TestServerNoMatch(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to decode body: %v", err)
 	}
-	if body["error"] != "no stub matched" {
-		t.Errorf("expected 'no stub matched', got %v", body["error"])
+	if body["error"] != "no matching stub" {
+		t.Errorf("expected 'no matching stub', got %v", body["error"])
+	}
+	// nearMisses must always be present (possibly empty) so clients can
+	// decode the field unconditionally.
+	if _, ok := body["nearMisses"]; !ok {
+		t.Errorf("expected 'nearMisses' field in 404 body, got %v", body)
 	}
 }
 
@@ -985,6 +991,390 @@ func TestFaultWithDelay(t *testing.T) {
 	}
 }
 
+// --- Near-Miss Integration Tests (P0.4) ---
+
+// nearMissAdminResponse decodes the JSON response from POST /__admin/nearmiss.
+type nearMissAdminResponse struct {
+	NearMisses []nearMissEntry `json:"nearMisses"`
+	Meta       struct {
+		Total float64 `json:"total"`
+		TopN  float64 `json:"topN"`
+	} `json:"meta"`
+}
+
+type nearMissEntry struct {
+	StubID    string           `json:"stubId"`
+	StubName  string           `json:"stubName,omitempty"`
+	Score     int              `json:"score"`
+	MaxScore  int              `json:"maxScore"`
+	Breakdown []breakdownDim   `json:"breakdown"`
+}
+
+type breakdownDim struct {
+	Dimension string `json:"dimension"`
+	Matched   bool   `json:"matched"`
+	Score     int    `json:"score"`
+	MaxScore  int    `json:"maxScore"`
+	Expected  string `json:"expected,omitempty"`
+	Actual    string `json:"actual,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// postNearMissAdmin sends a POST /__admin/nearmiss and returns the decoded
+// response or fails the test.
+func postNearMissAdmin(t *testing.T, adminURL, method, path string, headers map[string]string, body string) nearMissAdminResponse {
+	t.Helper()
+	reqBody := map[string]interface{}{
+		"method":  method,
+		"path":    path,
+		"headers": headers,
+		"body":    body,
+	}
+	// Omit empty optional fields to keep payload clean.
+	if body == "" {
+		delete(reqBody, "body")
+	}
+	if len(headers) == 0 {
+		delete(reqBody, "headers")
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("marshal nearmiss request: %v", err)
+	}
+	resp, err := http.Post(adminURL+"/__admin/nearmiss", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("POST /__admin/nearmiss: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d, body: %s", resp.StatusCode, string(raw))
+	}
+	var result nearMissAdminResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode nearmiss response: %v", err)
+	}
+	return result
+}
+
+func TestNearMiss_MethodMismatch(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Name:    "create-user",
+		Request: gmock.RequestPattern{Method: http.MethodPost, URLPath: "/api/users"},
+		Response: gmock.ResponseDefinition{Status: http.StatusCreated},
+	})
+
+	result := postNearMissAdmin(t, server.AdminURL(), http.MethodGet, "/api/users", nil, "")
+
+	if len(result.NearMisses) != 1 {
+		t.Fatalf("expected 1 near-miss, got %d", len(result.NearMisses))
+	}
+	nm := result.NearMisses[0]
+	if nm.StubName != "create-user" {
+		t.Errorf("expected stubName=create-user, got %q", nm.StubName)
+	}
+
+	// Find the method dimension in breakdown.
+	var methodDim *breakdownDim
+	for i := range nm.Breakdown {
+		if nm.Breakdown[i].Dimension == "method" {
+			methodDim = &nm.Breakdown[i]
+			break
+		}
+	}
+	if methodDim == nil {
+		t.Fatal("breakdown missing 'method' dimension")
+	}
+	if methodDim.Matched {
+		t.Error("expected method dimension NOT to match (GET vs POST)")
+	}
+	if !strings.Contains(methodDim.Reason, "POST") {
+		t.Errorf("expected method reason to mention POST, got %q", methodDim.Reason)
+	}
+}
+
+func TestNearMiss_PathMismatch(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Name:    "list-users",
+		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/users"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	result := postNearMissAdmin(t, server.AdminURL(), http.MethodGet, "/api/orders", nil, "")
+
+	if len(result.NearMisses) != 1 {
+		t.Fatalf("expected 1 near-miss, got %d", len(result.NearMisses))
+	}
+	var pathDim *breakdownDim
+	for i := range result.NearMisses[0].Breakdown {
+		if result.NearMisses[0].Breakdown[i].Dimension == "path" {
+			pathDim = &result.NearMisses[0].Breakdown[i]
+			break
+		}
+	}
+	if pathDim == nil {
+		t.Fatal("breakdown missing 'path' dimension")
+	}
+	if pathDim.Matched {
+		t.Error("expected path dimension NOT to match")
+	}
+}
+
+func TestNearMiss_HeaderMismatch(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Name: "auth-required",
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/secure",
+			Headers: map[string]string{"X-Token": "secret"},
+		},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	result := postNearMissAdmin(t, server.AdminURL(), http.MethodGet, "/api/secure", nil, "")
+
+	if len(result.NearMisses) != 1 {
+		t.Fatalf("expected 1 near-miss, got %d", len(result.NearMisses))
+	}
+	var headerDim *breakdownDim
+	for i := range result.NearMisses[0].Breakdown {
+		if strings.HasPrefix(result.NearMisses[0].Breakdown[i].Dimension, "header:") {
+			headerDim = &result.NearMisses[0].Breakdown[i]
+			break
+		}
+	}
+	if headerDim == nil {
+		t.Fatal("breakdown missing header dimension")
+	}
+	if headerDim.Matched {
+		t.Error("expected header dimension NOT to match (missing X-Token)")
+	}
+}
+
+func TestNearMiss_BodyMismatch(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Name: "exact-body",
+		Request: gmock.RequestPattern{
+			Method:  http.MethodPost,
+			URLPath: "/api/submit",
+			Body:    &gmock.BodyPattern{ExactMatch: `{"action":"approve"}`},
+		},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	result := postNearMissAdmin(t, server.AdminURL(), http.MethodPost, "/api/submit", nil, `{"action":"reject"}`)
+
+	if len(result.NearMisses) != 1 {
+		t.Fatalf("expected 1 near-miss, got %d", len(result.NearMisses))
+	}
+	var bodyDim *breakdownDim
+	for i := range result.NearMisses[0].Breakdown {
+		if result.NearMisses[0].Breakdown[i].Dimension == "body" {
+			bodyDim = &result.NearMisses[0].Breakdown[i]
+			break
+		}
+	}
+	if bodyDim == nil {
+		t.Fatal("breakdown missing 'body' dimension")
+	}
+	if bodyDim.Matched {
+		t.Error("expected body dimension NOT to match")
+	}
+}
+
+func TestNearMiss_MultipleCandidates(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	// Register 3 stubs that all match on GET but differ in path.
+	server.Stub(gmock.StubDefinition{
+		Name:     "users",
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/users"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+	server.Stub(gmock.StubDefinition{
+		Name:     "orders",
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/orders"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+	server.Stub(gmock.StubDefinition{
+		Name:     "items",
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/items"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	result := postNearMissAdmin(t, server.AdminURL(), http.MethodGet, "/api/unknown", nil, "")
+
+	if len(result.NearMisses) != 3 {
+		t.Fatalf("expected 3 near-miss candidates, got %d", len(result.NearMisses))
+	}
+
+	// Results should be ordered by score descending.
+	for i := 1; i < len(result.NearMisses); i++ {
+		if result.NearMisses[i].Score > result.NearMisses[i-1].Score {
+			t.Errorf("nearMisses not sorted by score desc: [%d]=%d > [%d]=%d",
+				i, result.NearMisses[i].Score, i-1, result.NearMisses[i-1].Score)
+		}
+	}
+}
+
+func TestNearMiss_TopNLimit(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	// Register 8 stubs. The default engine topN is 5.
+	for i := 0; i < 8; i++ {
+		server.Stub(gmock.StubDefinition{
+			Name:     fmt.Sprintf("stub-%d", i),
+			Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: fmt.Sprintf("/api/r%d", i)},
+			Response: gmock.ResponseDefinition{Status: http.StatusOK},
+		})
+	}
+
+	result := postNearMissAdmin(t, server.AdminURL(), http.MethodGet, "/api/missing", nil, "")
+
+	if len(result.NearMisses) > 5 {
+		t.Errorf("expected ≤5 results (default topN), got %d", len(result.NearMisses))
+	}
+	if result.Meta.TopN != 5 {
+		t.Errorf("expected meta.topN=5, got %v", result.Meta.TopN)
+	}
+}
+
+func TestNearMiss_ExactMatchOmitted(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Name:     "exact-stub",
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/exact"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	// Send a request that exactly matches the stub.
+	result := postNearMissAdmin(t, server.AdminURL(), http.MethodGet, "/api/exact", nil, "")
+
+	// Fully matching stub should NOT appear in nearMisses.
+	if len(result.NearMisses) != 0 {
+		t.Errorf("expected 0 nearMisses on exact match, got %d", len(result.NearMisses))
+	}
+	if result.Meta.Total != 0 {
+		t.Errorf("expected meta.total=0, got %v", result.Meta.Total)
+	}
+}
+
+func TestNearMiss_404ResponseIncludesNearMiss(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	// Register a stub that will nearly match.
+	server.Stub(gmock.StubDefinition{
+		Name:    "list-users",
+		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/users"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	// Send an unmatched request through the mock port (not admin).
+	resp, err := http.Get(server.URL() + "/api/users-extra")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Error      string `json:"error"`
+		Method     string `json:"method"`
+		Path       string `json:"path"`
+		NearMisses []struct {
+			StubID        string `json:"stubId"`
+			StubName      string `json:"stubName,omitempty"`
+			Score         int    `json:"score"`
+			MaxScore      int    `json:"maxScore"`
+			TopMissReason string `json:"topMissReason"`
+		} `json:"nearMisses"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode 404 body: %v", err)
+	}
+
+	if body.Error != "no matching stub" {
+		t.Errorf("expected error 'no matching stub', got %q", body.Error)
+	}
+	if body.Method != http.MethodGet {
+		t.Errorf("expected method GET, got %q", body.Method)
+	}
+	if body.Path != "/api/users-extra" {
+		t.Errorf("expected path /api/users-extra, got %q", body.Path)
+	}
+	if len(body.NearMisses) < 1 {
+		t.Fatalf("expected at least 1 nearMiss in 404 body, got 0")
+	}
+	first := body.NearMisses[0]
+	if first.StubName != "list-users" {
+		t.Errorf("expected stubName=list-users, got %q", first.StubName)
+	}
+	if first.TopMissReason == "" {
+		t.Error("expected non-empty topMissReason for path-mismatched stub")
+	}
+}
+
+func TestNearMiss_AdminEndpoint_BadRequests(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	t.Run("missing path", func(t *testing.T) {
+		resp, err := http.Post(server.AdminURL()+"/__admin/nearmiss", "application/json",
+			strings.NewReader(`{"method":"GET"}`))
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		resp, err := http.Post(server.AdminURL()+"/__admin/nearmiss", "application/json",
+			strings.NewReader(`not-json`))
+		if err != nil {
+			t.Fatalf("POST: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, server.AdminURL()+"/__admin/nearmiss", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", resp.StatusCode)
+		}
+	})
+}
+
 func TestFaultNoGzip(t *testing.T) {
 	server, cleanup := startServer(t)
 	defer cleanup()
@@ -1017,5 +1407,153 @@ func TestFaultNoGzip(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), `"fault":"error"`) {
 		t.Errorf("expected plain JSON fault body, got %s", string(body))
+	}
+}
+
+func TestRateLimit_Default429(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/ratelimited",
+		},
+		Response: gmock.ResponseDefinition{
+			Status: 200,
+			Body:   `{"ok":true}`,
+			Fault: &gmock.FaultDefinition{
+				Type:         "rate_limit",
+				PerSecond:    2,
+			},
+		},
+	})
+
+	// First 2 requests should succeed (full bucket = 2 tokens).
+	for i := 0; i < 2; i++ {
+		resp, err := http.Get(server.URL() + "/api/ratelimited")
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i+1, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("request %d: expected 200, got %d", i+1, resp.StatusCode)
+		}
+	}
+
+	// Third request should be rate-limited with default 429.
+	resp, err := http.Get(server.URL() + "/api/ratelimited")
+	if err != nil {
+		t.Fatalf("rate-limited request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", resp.StatusCode)
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
+	if !strings.Contains(body, `"fault":"rate_limit"`) {
+		t.Errorf("expected rate_limit fault in body, got %s", body)
+	}
+	if !strings.Contains(body, `"error":"rate limited"`) {
+		t.Errorf("expected 'rate limited' error in body, got %s", body)
+	}
+	if resp.Header.Get("Retry-After") != "1" {
+		t.Errorf("expected Retry-After: 1, got %q", resp.Header.Get("Retry-After"))
+	}
+}
+
+func TestRateLimit_CustomStatus(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/ratelimited503",
+		},
+		Response: gmock.ResponseDefinition{
+			Status: 200,
+			Body:   `{"ok":true}`,
+			Fault: &gmock.FaultDefinition{
+				Type:           "rate_limit",
+				PerSecond:      1,
+				RateLimitStatus: 503,
+			},
+		},
+	})
+
+	// First request should succeed.
+	resp, err := http.Get(server.URL() + "/api/ratelimited503")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// Second request should be rate-limited with custom 503.
+	resp, err = http.Get(server.URL() + "/api/ratelimited503")
+	if err != nil {
+		t.Fatalf("rate-limited request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestRateLimit_AfterRequests(t *testing.T) {
+	server, cleanup := startServer(t)
+	defer cleanup()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{
+			Method:  http.MethodGet,
+			URLPath: "/api/warmup",
+		},
+		Response: gmock.ResponseDefinition{
+			Status: 200,
+			Body:   `{"ok":true}`,
+			Fault: &gmock.FaultDefinition{
+				Type:          "rate_limit",
+				AfterRequests: 3,
+				PerSecond:     1,
+			},
+		},
+	})
+
+	// First 3 requests should succeed (warm-up phase).
+	for i := 0; i < 3; i++ {
+		resp, err := http.Get(server.URL() + "/api/warmup")
+		if err != nil {
+			t.Fatalf("warm-up request %d failed: %v", i+1, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("warm-up request %d: expected 200, got %d", i+1, resp.StatusCode)
+		}
+	}
+
+	// 4th request should succeed (1 token in bucket).
+	resp, err := http.Get(server.URL() + "/api/warmup")
+	if err != nil {
+		t.Fatalf("first post-warmup request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("first post-warmup request: expected 200, got %d", resp.StatusCode)
+	}
+
+	// 5th request should be rate-limited.
+	resp, err = http.Get(server.URL() + "/api/warmup")
+	if err != nil {
+		t.Fatalf("rate-limited request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", resp.StatusCode)
 	}
 }

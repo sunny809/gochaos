@@ -49,6 +49,13 @@ type ServerConfig struct {
 
 	// DisableGzip disables automatic gzip response compression.
 	DisableGzip bool
+
+	// RandSeed is the seed for the global pseudo-random number generator.
+	// When set to a non-zero value, all chaos behavior (delays, fault injection,
+	// probabilistic matching) produces identical sequences across runs.
+	// When zero (default), the RNG is seeded from the current time, matching
+	// the behavior of the unseeded math/rand global source.
+	RandSeed int64
 }
 
 // WithPort sets the listen port. Use 0 for a random available port.
@@ -133,5 +140,15 @@ func WithCORSEnabled() Option {
 func WithGzip(enabled bool) Option {
 	return func(c *ServerConfig) {
 		c.DisableGzip = !enabled
+	}
+}
+
+// WithRandSeed sets the seed for the global pseudo-random number generator.
+// A non-zero seed makes all chaos behavior (delays, fault injection,
+// probabilistic matching) fully deterministic and reproducible across runs.
+// Use 0 (the default) for non-deterministic behavior seeded from the clock.
+func WithRandSeed(seed int64) Option {
+	return func(c *ServerConfig) {
+		c.RandSeed = seed
 	}
 }
