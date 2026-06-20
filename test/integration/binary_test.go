@@ -116,7 +116,7 @@ func waitForReady(t *testing.T, baseURL string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(baseURL + "/__admin/health")
-		if err == nil {
+		if err == nil && resp != nil {
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {

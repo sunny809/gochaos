@@ -116,9 +116,12 @@ func TestAdminCreateAndListMappings(t *testing.T) {
 		"response": {"status": 200, "body": "from-admin"}
 	}`)
 
-	createReq, _ := http.NewRequest(http.MethodPost,
+	createReq, err := http.NewRequest(http.MethodPost,
 		server.AdminURL()+"/__admin/mappings",
 		bytes.NewReader(stubJSON))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	createReq.Header.Set("Content-Type", "application/json")
 
 	createResp, err := http.DefaultClient.Do(createReq)
@@ -179,8 +182,11 @@ func TestAdminDeleteMapping(t *testing.T) {
 		Response: gmock.ResponseDefinition{Status: 200},
 	})
 
-	delReq, _ := http.NewRequest(http.MethodDelete,
+	delReq, err := http.NewRequest(http.MethodDelete,
 		server.AdminURL()+"/__admin/mappings/"+id, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	delResp, err := http.DefaultClient.Do(delReq)
 	if err != nil {
 		t.Fatalf("delete failed: %v", err)
@@ -217,8 +223,11 @@ func TestAdminReset(t *testing.T) {
 	http.Get(server.URL() + "/a")
 	http.Get(server.URL() + "/b")
 
-	resetReq, _ := http.NewRequest(http.MethodPost,
+	resetReq, err := http.NewRequest(http.MethodPost,
 		server.AdminURL()+"/__admin/reset", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	resp, err := http.DefaultClient.Do(resetReq)
 	if err != nil {
 		t.Fatalf("reset failed: %v", err)
@@ -369,7 +378,10 @@ func TestPriorityOrdering(t *testing.T) {
 	// Without special header — should hit the general stub (only matches without header)
 	// Actually with the special-header stub having priority 1, it would NOT match without the header.
 	// Let's send WITH the header and verify the specific stub wins.
-	req, _ := http.NewRequest("GET", server.URL()+"/api/users", nil)
+	req, err := http.NewRequest("GET", server.URL()+"/api/users", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Header.Set("X-Special", "yes")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -560,7 +572,10 @@ func TestCORSEnabled(t *testing.T) {
 	})
 
 	// Test actual request with Origin header
-	req, _ := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Header.Set("Origin", "http://example.com")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -573,7 +588,10 @@ func TestCORSEnabled(t *testing.T) {
 	}
 
 	// Test CORS preflight
-	preReq, _ := http.NewRequest(http.MethodOptions, server.URL()+"/api/data", nil)
+	preReq, err := http.NewRequest(http.MethodOptions, server.URL()+"/api/data", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	preReq.Header.Set("Origin", "http://example.com")
 	preReq.Header.Set("Access-Control-Request-Method", "GET")
 	preResp, err := http.DefaultClient.Do(preReq)
@@ -621,7 +639,10 @@ func TestCookieMatching(t *testing.T) {
 	})
 
 	// With correct cookie
-	req, _ := http.NewRequest(http.MethodGet, server.URL()+"/api/me", nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL()+"/api/me", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.AddCookie(&http.Cookie{Name: "session_id", Value: "abc123"})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -674,7 +695,10 @@ func TestAcceptHeaderMatching(t *testing.T) {
 	})
 
 	// Test JSON accept
-	req, _ := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -687,7 +711,10 @@ func TestAcceptHeaderMatching(t *testing.T) {
 	}
 
 	// Test wildcard accept (matches json because it's first)
-	req2, _ := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
+	req2, err := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req2.Header.Set("Accept", "*/*")
 	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {
@@ -716,7 +743,10 @@ func TestGzipCompression(t *testing.T) {
 	})
 
 	// Request with Accept-Encoding: gzip
-	req, _ := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Header.Set("Accept-Encoding", "gzip")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1372,7 +1402,10 @@ func TestNearMiss_AdminEndpoint_BadRequests(t *testing.T) {
 	})
 
 	t.Run("method not allowed", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, server.AdminURL()+"/__admin/nearmiss", nil)
+		req, err := http.NewRequest(http.MethodGet, server.AdminURL()+"/__admin/nearmiss", nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("GET: %v", err)

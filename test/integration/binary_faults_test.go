@@ -67,9 +67,11 @@ func TestBinary_Fault_Malformed(t *testing.T) {
 
 	// Malformed responses may cause connection errors or fallback to 500
 	resp, err := http.Get(baseURL + "/fault-malformed")
-	if err != nil {
+	if err != nil || resp == nil {
 		// Connection error is acceptable (malformed sends garbage)
-		t.Logf("malformed fault caused connection error (expected): %v", err)
+		if err != nil {
+			t.Logf("malformed fault caused connection error (expected): %v", err)
+		}
 		return
 	}
 	defer resp.Body.Close()

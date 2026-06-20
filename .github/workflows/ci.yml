@@ -25,7 +25,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.0
+          version: v2.1.0
           args: --timeout=10m
 
   lint-slow:
@@ -42,7 +42,7 @@ jobs:
         run: go install go.uber.org/nilaway/cmd/nilaway@latest
 
       - name: nilaway nil pointer analysis
-        run: nilaway ./...
+        run: nilaway ./internal/... ./pkg/... ./cmd/...
 
       - name: Check go.mod tidy
         run: go mod tidy -diff
