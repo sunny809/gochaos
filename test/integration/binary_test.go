@@ -220,3 +220,18 @@ func readAll(t *testing.T, resp *http.Response) string {
 	}
 	return string(body)
 }
+
+// waitForPort polls a TCP port until it accepts a connection.
+func waitForPort(t *testing.T, port int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("port %d did not become ready within %v", port, timeout)
+}
