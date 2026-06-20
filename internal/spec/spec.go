@@ -54,17 +54,17 @@ type BodyPattern struct {
 
 // ResponseDefinition defines what the mock server should respond with.
 type ResponseDefinition struct {
-	Status   int               `json:"status,omitempty" yaml:"status,omitempty"`
-	Headers  map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
-	Body     string            `json:"body,omitempty" yaml:"body,omitempty"`
+	Status  int               `json:"status,omitempty" yaml:"status,omitempty"`
+	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Body    string            `json:"body,omitempty" yaml:"body,omitempty"`
 
 	// Base64Body is a base64-encoded binary response body.
 	// Takes precedence over Body when both are set and decodes successfully.
 	Base64Body string `json:"base64Body,omitempty" yaml:"base64Body,omitempty"`
 
-	TransformResponse bool              `json:"transformResponse,omitempty" yaml:"transformResponse,omitempty"`
-	Fault             *FaultDefinition  `json:"fault,omitempty" yaml:"fault,omitempty"`
-	Delay             *DelayDefinition  `json:"delay,omitempty" yaml:"delay,omitempty"`
+	TransformResponse bool             `json:"transformResponse,omitempty" yaml:"transformResponse,omitempty"`
+	Fault             *FaultDefinition `json:"fault,omitempty" yaml:"fault,omitempty"`
+	Delay             *DelayDefinition `json:"delay,omitempty" yaml:"delay,omitempty"`
 }
 
 // FaultDefinition describes a network-level fault to simulate.
@@ -222,6 +222,7 @@ type HeadersMap map[string][]string
 // ActivationMode describes the mode by which a fault was activated.
 type ActivationMode string
 
+// Standard activation modes for fault injection.
 const (
 	ModeAlways      ActivationMode = "always"
 	ModeProbability ActivationMode = "probability"
@@ -277,11 +278,11 @@ type FaultPattern struct {
 
 // FaultVerificationResult contains the outcome of a fault verification assertion.
 type FaultVerificationResult struct {
-	ExpectedCount int           `json:"expectedCount"`
-	ActualCount   int           `json:"actualCount"`
-	Matched       bool          `json:"matched"`
-	Errors        []string      `json:"errors,omitempty"`
-	Pattern       FaultPattern  `json:"pattern"`
+	ExpectedCount int          `json:"expectedCount"`
+	ActualCount   int          `json:"actualCount"`
+	Matched       bool         `json:"matched"`
+	Errors        []string     `json:"errors,omitempty"`
+	Pattern       FaultPattern `json:"pattern"`
 }
 
 // --- Match Result ---

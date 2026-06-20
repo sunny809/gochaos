@@ -892,9 +892,12 @@ func TestFaultViaAdminAPI(t *testing.T) {
 		"response": {"fault": {"type": "error"}}
 	}`)
 
-	createReq, _ := http.NewRequest(http.MethodPost,
+	createReq, err := http.NewRequest(http.MethodPost,
 		server.AdminURL()+"/__admin/mappings",
 		bytes.NewReader(stubJSON))
+	if err != nil {
+		t.Fatalf("create NewRequest: %v", err)
+	}
 	createReq.Header.Set("Content-Type", "application/json")
 
 	createResp, err := http.DefaultClient.Do(createReq)
@@ -930,9 +933,12 @@ func TestFaultViaAdminAPI(t *testing.T) {
 		"response": {"fault": {"type": "nonexistent_fault"}}
 	}`)
 
-	invalidReq, _ := http.NewRequest(http.MethodPost,
+	invalidReq, err := http.NewRequest(http.MethodPost,
 		server.AdminURL()+"/__admin/mappings",
 		bytes.NewReader(invalidStubJSON))
+	if err != nil {
+		t.Fatalf("invalid NewRequest: %v", err)
+	}
 	invalidReq.Header.Set("Content-Type", "application/json")
 
 	invalidResp, err := http.DefaultClient.Do(invalidReq)
@@ -1044,6 +1050,9 @@ func postNearMissAdmin(t *testing.T, adminURL, method, path string, headers map[
 	resp, err := http.Post(adminURL+"/__admin/nearmiss", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("POST /__admin/nearmiss: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("nil response from POST")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -1390,7 +1399,10 @@ func TestFaultNoGzip(t *testing.T) {
 	})
 
 	// Request with Accept-Encoding: gzip
-	req, _ := http.NewRequest(http.MethodGet, server.URL()+"/api/fault/no-gzip", nil)
+	req, err := http.NewRequest(http.MethodGet, server.URL()+"/api/fault/no-gzip", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Header.Set("Accept-Encoding", "gzip")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
