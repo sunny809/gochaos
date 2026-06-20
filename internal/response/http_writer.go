@@ -146,7 +146,7 @@ func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinit
 	if slowClosePending {
 		rw.Header().Set("Connection", "close")
 		if f, ok := rw.(http.Flusher); ok {
-			defer f.Flush()
+			f.Flush()
 		}
 	} else {
 		gw, gzw := w.maybeWrapGzip(rw, req)
