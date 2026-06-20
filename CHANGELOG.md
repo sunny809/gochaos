@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 1.5: Chaos Observability (O1-O3)** — CI-gateable assertions on what faults
+  actually fired. Essential for probabilistic/Nth-request/time-window activation modes.
+
+  - **O1: FaultInjectionLog** — Ring buffer (default 1000 entries) records every fault
+    injection event with stub ID, fault type, activation mode, request method/path, and
+    timestamp. Concurrent-safe; bounded memory.
+
+  - **O2: Admin API for fault log** — `GET /__admin/fault-log` lists all recorded fault
+    injections; `DELETE /__admin/fault-log` clears the log. Both return JSON with count.
+
+  - **O3: VerifyFaultsInjected API** — `server.VerifyFaultsInjected(pattern, count)`
+    asserts that faults matching the pattern were injected at least `count` times.
+    Pattern fields (`StubID`, `FaultType`, `ActivationMode`) are optional; empty fields
+    match all entries. Returns `FaultVerificationResult` with `Matched`, `ActualCount`,
+    and `Errors`.
+
 - **Phase 1: Chaos depth + reproducibility (A1-A11)** — Covers 90% of
   production HTTP failure categories with seedable RNG, new fault types, delay
   distributions, and activation modes.

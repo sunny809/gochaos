@@ -217,6 +217,31 @@ type LoggedRequest struct {
 // HeadersMap is a JSON-friendly representation of http.Header.
 type HeadersMap map[string][]string
 
+// --- Activation Mode ---
+
+// ActivationMode describes the mode by which a fault was activated.
+type ActivationMode string
+
+const (
+	ModeAlways      ActivationMode = "always"
+	ModeProbability ActivationMode = "probability"
+	ModeNthRequest  ActivationMode = "nth_request"
+	ModeTimeWindow  ActivationMode = "time_window"
+	ModeCombined    ActivationMode = "combined"
+)
+
+// --- Fault Injection Log ---
+
+// FaultInjectionEntry represents a single fault injection event for logging purposes.
+type FaultInjectionEntry struct {
+	StubID         string         `json:"stubId"`
+	FaultType      string         `json:"faultType"`
+	ActivatedAt    time.Time      `json:"activatedAt"`
+	RequestMethod  string         `json:"requestMethod"`
+	RequestPath    string         `json:"requestPath"`
+	ActivationMode ActivationMode `json:"activationMode"`
+}
+
 // --- Verification ---
 
 // VerificationResult contains the outcome of a verify assertion.
@@ -239,6 +264,24 @@ type VerificationResult struct {
 	// or nil when query params were not asserted. This is a shallow copy of the
 	// caller-supplied pattern to prevent aliasing after Verify returns.
 	QueryParamPattern map[string]string `json:"queryParamPattern,omitempty"`
+}
+
+// --- Fault Verification ---
+
+// FaultPattern defines a pattern for verifying fault injection behavior.
+type FaultPattern struct {
+	StubID         string `json:"stubId,omitempty"`
+	FaultType      string `json:"faultType,omitempty"`
+	ActivationMode string `json:"activationMode,omitempty"`
+}
+
+// FaultVerificationResult contains the outcome of a fault verification assertion.
+type FaultVerificationResult struct {
+	ExpectedCount int           `json:"expectedCount"`
+	ActualCount   int           `json:"actualCount"`
+	Matched       bool          `json:"matched"`
+	Errors        []string      `json:"errors,omitempty"`
+	Pattern       FaultPattern  `json:"pattern"`
 }
 
 // --- Match Result ---

@@ -1,7 +1,8 @@
 // Package admin implements the gmock admin REST API.
 //
 // The admin API provides HTTP endpoints for managing stubs, viewing request logs,
-// and resetting server state. It is mounted under the /__admin/ prefix by default.
+// fault injection logs, and resetting server state. It is mounted under the
+// /__admin/ prefix by default.
 //
 // API endpoints:
 //
@@ -14,6 +15,8 @@
 //	POST   /__admin/reset          Reset all server state
 //	GET    /__admin/requests       List logged requests
 //	DELETE /__admin/requests       Clear request log
+//	GET    /__admin/fault-log      List fault injection events
+//	DELETE /__admin/fault-log      Clear fault injection log
 //	GET    /__admin/health         Health check
 package admin
 
@@ -22,6 +25,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sunny809/gochaos/internal/faultlog"
 	"github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
 	"github.com/sunny809/gochaos/internal/stub"
@@ -34,15 +38,17 @@ const Prefix = "/__admin/"
 type Handler struct {
 	registry       *stub.Registry
 	requestLog     *log.RequestLog
+	faultLog       *faultlog.FaultInjectionLog
 	nearMissEngine *nearmiss.Engine
 	resetFns       []func() // additional reset hooks (scenarios, proxy, etc.)
 }
 
-// New creates an admin Handler bound to the given registry, request log, and near-miss engine.
-func New(registry *stub.Registry, requestLog *log.RequestLog, nearMissEngine *nearmiss.Engine) *Handler {
+// New creates an admin Handler bound to the given registry, request log, fault log, and near-miss engine.
+func New(registry *stub.Registry, requestLog *log.RequestLog, faultLog *faultlog.FaultInjectionLog, nearMissEngine *nearmiss.Engine) *Handler {
 	return &Handler{
 		registry:       registry,
 		requestLog:     requestLog,
+		faultLog:       faultLog,
 		nearMissEngine: nearMissEngine,
 	}
 }
@@ -107,6 +113,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.listRequests(w, r)
 		case http.MethodDelete:
 			h.clearRequests(w, r)
+		default:
+			methodNotAllowed(w)
+		}
+
+	case path == Prefix+"fault-log":
+		switch r.Method {
+		case http.MethodGet:
+			h.listFaultLog(w, r)
+		case http.MethodDelete:
+			h.clearFaultLog(w, r)
 		default:
 			methodNotAllowed(w)
 		}

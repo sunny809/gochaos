@@ -13,11 +13,18 @@ import (
 	"github.com/sunny809/gochaos/internal/spec"
 )
 
+// ShouldActivateResult captures the outcome of activation evaluation.
+type ShouldActivateResult struct {
+	ShouldFire bool
+	Mode       spec.ActivationMode
+}
+
 // ShouldActivate checks whether a fault should be triggered based on its
-// activation criteria. Returns true if the fault should fire.
+// activation criteria. Returns ShouldActivateResult with ShouldFire=true if
+// the fault should fire, along with the ActivationMode that caused it to fire.
 //
-// When activation is nil, returns true (always-on behavior), preserving
-// backward compatibility with stubs that do not configure activation.
+// When activation is nil, returns {true, ModeAlways} (always-on behavior),
+// preserving backward compatibility with stubs that do not configure activation.
 //
 // Activation modes are evaluated independently. When multiple modes are
 // configured simultaneously, they use AND semantics: all configured modes
@@ -36,9 +43,9 @@ import (
 //   - rng: the seedable random number generator for probabilistic decisions
 //   - hitCount: the number of times this stub has been matched (for everyNthRequest)
 //   - serverStart: the time the server started (for time-window calculations)
-func ShouldActivate(activation *spec.Activation, rng randx.RNG, hitCount uint64, serverStart time.Time) bool {
+func ShouldActivate(activation *spec.Activation, rng randx.RNG, hitCount uint64, serverStart time.Time) ShouldActivateResult {
 	if activation == nil {
-		return true
+		return ShouldActivateResult{ShouldFire: true, Mode: spec.ModeAlways}
 	}
 
 	// Determine which modes are configured (non-zero value).
@@ -48,7 +55,7 @@ func ShouldActivate(activation *spec.Activation, rng randx.RNG, hitCount uint64,
 
 	// If no mode is configured, treat as always-on.
 	if !hasProb && !hasNth && !hasTimeWindow {
-		return true
+		return ShouldActivateResult{ShouldFire: true, Mode: spec.ModeAlways}
 	}
 
 	// Evaluate each configured mode. Unconfigured modes default to true
@@ -95,5 +102,36 @@ func ShouldActivate(activation *spec.Activation, rng randx.RNG, hitCount uint64,
 	// AND semantics: all configured modes must pass.
 	result := probPass && nthPass && timeWindowPass
 
-	return result
+	if !result {
+		return ShouldActivateResult{ShouldFire: false, Mode: ""}
+	}
+
+	// Determine the activation mode for logging.
+	// When multiple modes are configured and all pass, use ModeCombined.
+	mode := determineActivationMode(hasProb, hasNth, hasTimeWindow)
+	return ShouldActivateResult{ShouldFire: true, Mode: mode}
+}
+
+// determineActivationMode returns the ActivationMode based on which modes were configured.
+func determineActivationMode(hasProb, hasNth, hasTimeWindow bool) spec.ActivationMode {
+	count := 0
+	var mode spec.ActivationMode
+
+	if hasProb {
+		count++
+		mode = spec.ModeProbability
+	}
+	if hasNth {
+		count++
+		mode = spec.ModeNthRequest
+	}
+	if hasTimeWindow {
+		count++
+		mode = spec.ModeTimeWindow
+	}
+
+	if count > 1 {
+		return spec.ModeCombined
+	}
+	return mode
 }

@@ -165,7 +165,7 @@ func TestValidateActivation(t *testing.T) {
 func TestShouldActivate_NilActivation(t *testing.T) {
 	rng := randx.NewGlobal(42)
 	// nil activation should always return true (always-on)
-	if !ShouldActivate(nil, rng, 0, time.Time{}) {
+	if !ShouldActivate(nil, rng, 0, time.Time{}).ShouldFire {
 		t.Error("ShouldActivate(nil) = false, want true (always-on)")
 	}
 }
@@ -179,7 +179,7 @@ func TestShouldActivate_ProbabilityZero(t *testing.T) {
 	// Activation{} — always-on for backward compatibility.
 	// If a user wants "never fire", they should not configure a fault at all.
 	for i := 0; i < 100; i++ {
-		if !ShouldActivate(activation, rng, 0, time.Time{}) {
+		if !ShouldActivate(activation, rng, 0, time.Time{}).ShouldFire {
 			t.Errorf("ShouldActivate with probability 0.0 (unconfigured) returned false on iteration %d, want true", i)
 			break
 		}
@@ -192,7 +192,7 @@ func TestShouldActivate_ProbabilityOne(t *testing.T) {
 
 	// probability 1.0 should always activate
 	for i := 0; i < 100; i++ {
-		if !ShouldActivate(activation, rng, 0, time.Time{}) {
+		if !ShouldActivate(activation, rng, 0, time.Time{}).ShouldFire {
 			t.Errorf("ShouldActivate with probability 1.0 did not activate on iteration %d", i)
 			break
 		}
@@ -208,7 +208,7 @@ func TestShouldActivate_ProbabilityStatistical(t *testing.T) {
 	triggered := 0
 	total := 1000
 	for i := 0; i < total; i++ {
-		if ShouldActivate(activation, rng, 0, time.Time{}) {
+		if ShouldActivate(activation, rng, 0, time.Time{}).ShouldFire {
 			triggered++
 		}
 	}
@@ -226,7 +226,7 @@ func TestShouldActivate_ProbabilityLow(t *testing.T) {
 	triggered := 0
 	total := 10000
 	for i := 0; i < total; i++ {
-		if ShouldActivate(activation, rng, 0, time.Time{}) {
+		if ShouldActivate(activation, rng, 0, time.Time{}).ShouldFire {
 			triggered++
 		}
 	}
@@ -245,7 +245,7 @@ func TestShouldActivate_ProbabilityHigh(t *testing.T) {
 	triggered := 0
 	total := 10000
 	for i := 0; i < total; i++ {
-		if ShouldActivate(activation, rng, 0, time.Time{}) {
+		if ShouldActivate(activation, rng, 0, time.Time{}).ShouldFire {
 			triggered++
 		}
 	}
@@ -263,13 +263,13 @@ func TestShouldActivate_Deterministic(t *testing.T) {
 	rng1 := randx.NewGlobal(42)
 	results1 := make([]bool, 100)
 	for i := range results1 {
-		results1[i] = ShouldActivate(activation, rng1, 0, time.Time{})
+		results1[i] = ShouldActivate(activation, rng1, 0, time.Time{}).ShouldFire
 	}
 
 	rng2 := randx.NewGlobal(42)
 	results2 := make([]bool, 100)
 	for i := range results2 {
-		results2[i] = ShouldActivate(activation, rng2, 0, time.Time{})
+		results2[i] = ShouldActivate(activation, rng2, 0, time.Time{}).ShouldFire
 	}
 
 	for i := range results1 {
@@ -322,7 +322,7 @@ func TestHTTPWriter_ApplyFault_WithActivation_ProbabilityOne(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+		_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 		if err != nil {
 			t.Fatalf("WriteResponse failed: %v", err)
 		}
@@ -356,7 +356,7 @@ func TestHTTPWriter_ApplyFault_WithActivation_ProbabilityZero(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+		_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 		if err != nil {
 			t.Fatalf("WriteResponse failed: %v", err)
 		}
@@ -382,7 +382,7 @@ func TestHTTPWriter_ApplyFault_WithActivation_BackwardCompatible(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestHTTPWriter_ApplyFault_WithActivation_Statistical(t *testing.T) {
 	for i := 0; i < total; i++ {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+		_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 		if err != nil {
 			t.Fatalf("WriteResponse failed on iteration %d: %v", i, err)
 		}
@@ -467,7 +467,7 @@ func TestHTTPWriter_ApplyFault_WithActivation_EmptyFaultType(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -487,7 +487,7 @@ func TestShouldActivate_EveryNthRequest_FiresOnMultiples(t *testing.T) {
 	// hitCount starts at 1 (after increment). Should fire on 3, 6, 9.
 	results := make([]bool, 10)
 	for i := 1; i <= 10; i++ {
-		results[i-1] = ShouldActivate(activation, rng, uint64(i), time.Time{})
+		results[i-1] = ShouldActivate(activation, rng, uint64(i), time.Time{}).ShouldFire
 	}
 
 	// Expected: [false, false, true, false, false, true, false, false, true, false]
@@ -505,7 +505,7 @@ func TestShouldActivate_EveryNthRequest_One(t *testing.T) {
 
 	// EveryNthRequest=1 means every request fires (1%1==0, 2%1==0, etc.)
 	for i := 1; i <= 10; i++ {
-		if !ShouldActivate(activation, rng, uint64(i), time.Time{}) {
+		if !ShouldActivate(activation, rng, uint64(i), time.Time{}).ShouldFire {
 			t.Errorf("hitCount %d: ShouldActivate = false, want true (everyNthRequest=1)", i)
 		}
 	}
@@ -517,7 +517,7 @@ func TestShouldActivate_EveryNthRequest_Two(t *testing.T) {
 
 	// Should fire on even hitCounts: 2, 4, 6, 8, 10
 	for i := 1; i <= 10; i++ {
-		got := ShouldActivate(activation, rng, uint64(i), time.Time{})
+		got := ShouldActivate(activation, rng, uint64(i), time.Time{}).ShouldFire
 		want := i%2 == 0
 		if got != want {
 			t.Errorf("hitCount %d: ShouldActivate = %v, want %v", i, got, want)
@@ -532,7 +532,7 @@ func TestShouldActivate_EveryNthRequest_ZeroNotConfigured(t *testing.T) {
 	activation := &spec.Activation{EveryNthRequest: 0, Probability: 1.0}
 
 	for i := 0; i < 10; i++ {
-		if !ShouldActivate(activation, rng, uint64(i), time.Time{}) {
+		if !ShouldActivate(activation, rng, uint64(i), time.Time{}).ShouldFire {
 			t.Errorf("hitCount %d: ShouldActivate = false, want true (everyNthRequest=0 is no-op)", i)
 		}
 	}
@@ -546,7 +546,7 @@ func TestShouldActivate_EveryNthRequest_AND_Probability(t *testing.T) {
 	activation := &spec.Activation{EveryNthRequest: 2, Probability: 1.0}
 
 	for i := 1; i <= 10; i++ {
-		got := ShouldActivate(activation, rng, uint64(i), time.Time{})
+		got := ShouldActivate(activation, rng, uint64(i), time.Time{}).ShouldFire
 		want := i%2 == 0 // everyNthRequest passes on even, probability=1.0 always passes
 		if got != want {
 			t.Errorf("hitCount %d: ShouldActivate = %v, want %v (AND: nth=%v, prob=1.0)",
@@ -562,7 +562,7 @@ func TestShouldActivate_EveryNthRequest_AND_ProbabilityZero(t *testing.T) {
 	activation := &spec.Activation{EveryNthRequest: 2, Probability: 0.0}
 
 	for i := 1; i <= 10; i++ {
-		got := ShouldActivate(activation, rng, uint64(i), time.Time{})
+		got := ShouldActivate(activation, rng, uint64(i), time.Time{}).ShouldFire
 		want := i%2 == 0
 		if got != want {
 			t.Errorf("hitCount %d: ShouldActivate = %v, want %v (probability 0.0 is unconfigured)", i, got, want)
@@ -581,7 +581,7 @@ func TestShouldActivate_EveryNthRequest_AND_ProbabilityHalf(t *testing.T) {
 	total := 1000
 
 	for i := 1; i <= total; i++ {
-		if ShouldActivate(activation, rng, uint64(i), time.Time{}) {
+		if ShouldActivate(activation, rng, uint64(i), time.Time{}).ShouldFire {
 			triggered++
 		}
 		if i%2 == 0 {
@@ -607,13 +607,13 @@ func TestShouldActivate_EveryNthRequest_Deterministic(t *testing.T) {
 	rng1 := randx.NewGlobal(42)
 	results1 := make([]bool, 100)
 	for i := range results1 {
-		results1[i] = ShouldActivate(activation, rng1, uint64(i+1), time.Time{})
+		results1[i] = ShouldActivate(activation, rng1, uint64(i+1), time.Time{}).ShouldFire
 	}
 
 	rng2 := randx.NewGlobal(42)
 	results2 := make([]bool, 100)
 	for i := range results2 {
-		results2[i] = ShouldActivate(activation, rng2, uint64(i+1), time.Time{})
+		results2[i] = ShouldActivate(activation, rng2, uint64(i+1), time.Time{}).ShouldFire
 	}
 
 	for i := range results1 {
@@ -667,7 +667,7 @@ func TestHTTPWriter_ApplyFault_WithEveryNthRequest(t *testing.T) {
 	for hitCount := uint64(1); hitCount <= 9; hitCount++ {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		err := w.WriteResponse(rr, def, req, nil, hitCount, time.Time{})
+		_, err := w.WriteResponse(rr, def, req, nil, hitCount, time.Time{})
 		if err != nil {
 			t.Fatalf("hitCount %d: WriteResponse failed: %v", hitCount, err)
 		}
@@ -712,7 +712,7 @@ func TestHTTPWriter_ApplyFault_EveryNthRequest_AND_ProbabilityOne(t *testing.T) 
 	for hitCount := uint64(1); hitCount <= 6; hitCount++ {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		err := w.WriteResponse(rr, def, req, nil, hitCount, time.Time{})
+		_, err := w.WriteResponse(rr, def, req, nil, hitCount, time.Time{})
 		if err != nil {
 			t.Fatalf("hitCount %d: WriteResponse failed: %v", hitCount, err)
 		}
@@ -752,7 +752,7 @@ func TestHTTPWriter_ApplyFault_EveryNthRequest_AND_ProbabilityZero(t *testing.T)
 	for hitCount := uint64(1); hitCount <= 6; hitCount++ {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		err := w.WriteResponse(rr, def, req, nil, hitCount, time.Time{})
+		_, err := w.WriteResponse(rr, def, req, nil, hitCount, time.Time{})
 		if err != nil {
 			t.Fatalf("hitCount %d: WriteResponse failed: %v", hitCount, err)
 		}
@@ -785,7 +785,7 @@ func TestHTTPWriter_ApplyFault_EveryNthRequest_BackwardCompatible(t *testing.T) 
 	for hitCount := uint64(1); hitCount <= 5; hitCount++ {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		err := w.WriteResponse(rr, def, req, nil, hitCount, time.Time{})
+		_, err := w.WriteResponse(rr, def, req, nil, hitCount, time.Time{})
 		if err != nil {
 			t.Fatalf("hitCount %d: WriteResponse failed: %v", hitCount, err)
 		}
@@ -808,13 +808,13 @@ func TestShouldActivate_ActiveBetween_SingleWindow_AlwaysOn(t *testing.T) {
 	serverStart := time.Now()
 
 	// Within window (immediately after start): should activate.
-	if !ShouldActivate(activation, rng, 1, serverStart) {
+	if !ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = false within [0, 5000ms) window, want true")
 	}
 
 	// Outside window (6 seconds after start): should not activate.
 	outsideStart := serverStart.Add(-6 * time.Second)
-	if ShouldActivate(activation, rng, 1, outsideStart) {
+	if ShouldActivate(activation, rng, 1, outsideStart).ShouldFire {
 		t.Error("ShouldActivate = true outside [0, 5000ms) window, want false")
 	}
 }
@@ -833,7 +833,7 @@ func TestShouldActivate_ActiveBetween_SingleWindow_WithProbability(t *testing.T)
 	triggered := 0
 	total := 1000
 	for i := 0; i < total; i++ {
-		if ShouldActivate(activation, rng, 1, serverStart) {
+		if ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 			triggered++
 		}
 	}
@@ -854,19 +854,19 @@ func TestShouldActivate_ActiveBetween_MultipleSegments(t *testing.T) {
 	serverStart := time.Now()
 
 	// Within first window (0-30s): always-on, should activate.
-	if !ShouldActivate(activation, rng, 1, serverStart) {
+	if !ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = false in first window [0, 30s), want true")
 	}
 
 	// Within second window (30-60s): should activate (probability 1.0).
 	inSecondWindow := serverStart.Add(-35 * time.Second) // elapsed = 35s
-	if !ShouldActivate(activation, rng, 1, inSecondWindow) {
+	if !ShouldActivate(activation, rng, 1, inSecondWindow).ShouldFire {
 		t.Error("ShouldActivate = false in second window [30s, 90s), want true")
 	}
 
 	// Outside all windows (100s elapsed): should not activate.
 	outsideAll := serverStart.Add(-100 * time.Second)
-	if ShouldActivate(activation, rng, 1, outsideAll) {
+	if ShouldActivate(activation, rng, 1, outsideAll).ShouldFire {
 		t.Error("ShouldActivate = true outside all windows, want false")
 	}
 }
@@ -887,7 +887,7 @@ func TestShouldActivate_ActiveBetween_MultipleSegments_GradualFault(t *testing.T
 	triggered := 0
 	total := 1000
 	for i := 0; i < total; i++ {
-		if ShouldActivate(activation, rng, 1, serverStart) {
+		if ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 			triggered++
 		}
 	}
@@ -907,19 +907,19 @@ func TestShouldActivate_ActiveBetween_OutsideAllWindows(t *testing.T) {
 
 	// 500ms elapsed: before all windows.
 	serverStart := time.Now().Add(-500 * time.Millisecond)
-	if ShouldActivate(activation, rng, 1, serverStart) {
+	if ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = true before all windows (500ms), want false")
 	}
 
 	// 7s elapsed: between windows (gap).
 	serverStart = time.Now().Add(-7 * time.Second)
-	if ShouldActivate(activation, rng, 1, serverStart) {
+	if ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = true between windows (7s), want false")
 	}
 
 	// 25s elapsed: after all windows.
 	serverStart = time.Now().Add(-25 * time.Second)
-	if ShouldActivate(activation, rng, 1, serverStart) {
+	if ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = true after all windows (25s), want false")
 	}
 }
@@ -936,7 +936,7 @@ func TestShouldActivate_ActiveBetween_FirstWindowWins(t *testing.T) {
 
 	// At 7s: both windows match. First window wins -> always-on.
 	serverStart := time.Now().Add(-7 * time.Second)
-	if !ShouldActivate(activation, rng, 1, serverStart) {
+	if !ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = false when in overlapping windows, first should win with prob=1.0")
 	}
 }
@@ -951,7 +951,7 @@ func TestShouldActivate_ActiveBetween_WindowProbabilityZeroIsAlwaysOn(t *testing
 
 	serverStart := time.Now()
 	for i := 0; i < 100; i++ {
-		if !ShouldActivate(activation, rng, 1, serverStart) {
+		if !ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 			t.Error("ShouldActivate = false with no window probability (always-on), want true")
 			break
 		}
@@ -969,13 +969,13 @@ func TestShouldActivate_ActiveBetween_AND_Probability(t *testing.T) {
 	}
 
 	serverStart := time.Now()
-	if !ShouldActivate(activation, rng, 1, serverStart) {
+	if !ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = false with activeBetween (in window) AND probability=1.0, want true")
 	}
 
 	// Outside the window: activeBetween fails -> AND result is false.
 	outsideStart := serverStart.Add(-15 * time.Second)
-	if ShouldActivate(activation, rng, 1, outsideStart) {
+	if ShouldActivate(activation, rng, 1, outsideStart).ShouldFire {
 		t.Error("ShouldActivate = true with activeBetween (outside window) AND probability=1.0, want false")
 	}
 }
@@ -993,18 +993,18 @@ func TestShouldActivate_ActiveBetween_AND_EveryNthRequest(t *testing.T) {
 	serverStart := time.Now()
 
 	// hitCount=2: both pass (in window, even hitCount).
-	if !ShouldActivate(activation, rng, 2, serverStart) {
+	if !ShouldActivate(activation, rng, 2, serverStart).ShouldFire {
 		t.Error("ShouldActivate = false with activeBetween (in window) AND everyNthRequest=2 at hitCount=2, want true")
 	}
 
 	// hitCount=1: in window but odd hitCount.
-	if ShouldActivate(activation, rng, 1, serverStart) {
+	if ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = true with activeBetween (in window) AND everyNthRequest=2 at hitCount=1, want false")
 	}
 
 	// hitCount=2: outside window (even if nth passes, time fails).
 	outsideStart := serverStart.Add(-15 * time.Second)
-	if ShouldActivate(activation, rng, 2, outsideStart) {
+	if ShouldActivate(activation, rng, 2, outsideStart).ShouldFire {
 		t.Error("ShouldActivate = true with activeBetween (outside) AND everyNthRequest=2, want false")
 	}
 }
@@ -1018,7 +1018,7 @@ func TestShouldActivate_ActiveBetween_NoActiveBetween_BackwardCompatible(t *test
 	}
 
 	serverStart := time.Now()
-	if !ShouldActivate(activation, rng, 1, serverStart) {
+	if !ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = false with empty ActiveBetween AND probability=1.0, want true")
 	}
 }
@@ -1034,7 +1034,7 @@ func TestShouldActivate_ActiveBetween_ZeroStartTime(t *testing.T) {
 	}
 
 	// Zero serverStart: time.Since(zero) is decades, way past the 5s window.
-	if ShouldActivate(activation, rng, 1, time.Time{}) {
+	if ShouldActivate(activation, rng, 1, time.Time{}).ShouldFire {
 		t.Error("ShouldActivate = true with zero serverStart and small window, want false (elapsed is huge)")
 	}
 }
@@ -1049,7 +1049,7 @@ func TestShouldActivate_ActiveBetween_EdgeExactStart(t *testing.T) {
 
 	// Exactly at startMs (1s elapsed): inclusive, should match.
 	serverStart := time.Now().Add(-1000 * time.Millisecond)
-	if !ShouldActivate(activation, rng, 1, serverStart) {
+	if !ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = false at exactly startMs, want true (inclusive)")
 	}
 }
@@ -1064,7 +1064,7 @@ func TestShouldActivate_ActiveBetween_EdgeExactEnd(t *testing.T) {
 
 	// Exactly at endMs (5s elapsed): exclusive, should NOT match.
 	serverStart := time.Now().Add(-5000 * time.Millisecond)
-	if ShouldActivate(activation, rng, 1, serverStart) {
+	if ShouldActivate(activation, rng, 1, serverStart).ShouldFire {
 		t.Error("ShouldActivate = true at exactly endMs, want false (exclusive)")
 	}
 }
@@ -1081,13 +1081,13 @@ func TestShouldActivate_ActiveBetween_Deterministic(t *testing.T) {
 	rng1 := randx.NewGlobal(42)
 	results1 := make([]bool, 100)
 	for i := range results1 {
-		results1[i] = ShouldActivate(activation, rng1, 1, serverStart)
+		results1[i] = ShouldActivate(activation, rng1, 1, serverStart).ShouldFire
 	}
 
 	rng2 := randx.NewGlobal(42)
 	results2 := make([]bool, 100)
 	for i := range results2 {
-		results2[i] = ShouldActivate(activation, rng2, 1, serverStart)
+		results2[i] = ShouldActivate(activation, rng2, 1, serverStart).ShouldFire
 	}
 
 	for i := range results1 {
@@ -1238,7 +1238,7 @@ func TestHTTPWriter_ApplyFault_WithActiveBetween_InWindow(t *testing.T) {
 	serverStart := time.Now()
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	err := w.WriteResponse(rr, def, req, nil, 1, serverStart)
+	_, err := w.WriteResponse(rr, def, req, nil, 1, serverStart)
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1272,7 +1272,7 @@ func TestHTTPWriter_ApplyFault_WithActiveBetween_OutsideWindow(t *testing.T) {
 	serverStart := time.Now().Add(-10 * time.Second)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	err := w.WriteResponse(rr, def, req, nil, 1, serverStart)
+	_, err := w.WriteResponse(rr, def, req, nil, 1, serverStart)
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1341,7 +1341,7 @@ func TestHTTPWriter_ApplyFault_WithActiveBetween_MultiSegment(t *testing.T) {
 			t.Helper()
 			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			err := w.WriteResponse(rr, def, req, nil, 1, tt.serverStart)
+			_, err := w.WriteResponse(rr, def, req, nil, 1, tt.serverStart)
 			if err != nil {
 				t.Fatalf("WriteResponse failed: %v", err)
 			}
@@ -1382,7 +1382,7 @@ func TestHTTPWriter_ApplyFault_WithActiveBetween_AND_EveryNthRequest(t *testing.
 	// hitCount=1: in window but odd -> AND fails (nth blocks).
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	err := w.WriteResponse(rr, def, req, nil, 1, serverStart)
+	_, err := w.WriteResponse(rr, def, req, nil, 1, serverStart)
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1392,7 +1392,7 @@ func TestHTTPWriter_ApplyFault_WithActiveBetween_AND_EveryNthRequest(t *testing.
 
 	// hitCount=2: in window AND even -> AND passes.
 	rr = httptest.NewRecorder()
-	err = w.WriteResponse(rr, def, req, nil, 2, serverStart)
+	_, err = w.WriteResponse(rr, def, req, nil, 2, serverStart)
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}

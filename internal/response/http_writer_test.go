@@ -169,7 +169,7 @@ func TestHTTPWriter_WriteResponse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			err := w.WriteResponse(rr, tt.def, req, tt.corsOpts, 0, time.Time{})
+			_, err := w.WriteResponse(rr, tt.def, req, tt.corsOpts, 0, time.Time{})
 			if err != nil {
 				t.Fatalf("WriteResponse failed: %v", err)
 			}
@@ -233,7 +233,7 @@ func TestHTTPWriter_WriteResponse_Delay(t *testing.T) {
 
 			start := time.Now()
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+			_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 			elapsed := time.Since(start)
 
 			if err != nil {
@@ -271,7 +271,7 @@ func TestHTTPWriter_WriteResponse_RandomDelay(t *testing.T) {
 		rr := httptest.NewRecorder()
 		start := time.Now()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+		_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 		elapsed := time.Since(start)
 
 		if err != nil {
@@ -508,7 +508,7 @@ func TestHTTPWriter_ConcurrentSafety(t *testing.T) {
 					Body:   fmt.Sprintf("response-%d", idx),
 				},
 			}
-			_ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil, 0, time.Time{})
+			_, _ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil, 0, time.Time{})
 		}(i)
 	}
 
@@ -534,7 +534,7 @@ func TestHTTPWriter_WriteResponse_ErrorOnWrite(t *testing.T) {
 	// httptest.ResponseRecorder should handle this fine
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed unexpectedly: %v", err)
 	}
@@ -646,7 +646,7 @@ func TestHTTPWriter_WriteResponse_TemplateRendering(t *testing.T) {
 				},
 			}
 
-			err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+			_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 			if err != nil {
 				t.Fatalf("WriteResponse failed: %v", err)
 			}
@@ -749,7 +749,7 @@ func TestHTTPWriter_WriteResponse_FaultError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			err := w.WriteResponse(rr, tt.def, req, nil, 0, time.Time{})
+			_, err := w.WriteResponse(rr, tt.def, req, nil, 0, time.Time{})
 			if err != nil {
 				t.Fatalf("WriteResponse failed: %v", err)
 			}
@@ -790,7 +790,7 @@ func TestHTTPWriter_WriteResponse_FaultWithDelay(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	start := time.Now()
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -828,7 +828,7 @@ func TestHTTPWriter_WriteResponse_FaultNotGzipped(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -913,7 +913,7 @@ func TestHTTPWriter_WriteResponse_FaultEmpty(t *testing.T) {
 			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
 			start := time.Now()
-			err := w.WriteResponse(rr, tt.def, req, nil, 0, time.Time{})
+			_, err := w.WriteResponse(rr, tt.def, req, nil, 0, time.Time{})
 			elapsed := time.Since(start)
 
 			if err != nil {
@@ -965,7 +965,7 @@ func TestHTTPWriter_WriteResponse_FaultEmptyNotGzipped(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1024,7 +1024,7 @@ func TestHTTPWriter_WriteResponse_FaultConnectionReset_HijackerAvailable(t *test
 	hj := &mockHijacker{ResponseWriter: rr}
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1054,7 +1054,7 @@ func TestHTTPWriter_WriteResponse_FaultConnectionReset_HijackerNotAvailable(t *t
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1095,7 +1095,7 @@ func TestHTTPWriter_WriteResponse_FaultConnectionReset_WithDelay(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
 	start := time.Now()
-	err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -1131,7 +1131,7 @@ func TestHTTPWriter_WriteResponse_FaultConnectionReset_NotGzipped(t *testing.T) 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1349,7 +1349,7 @@ func TestHTTPWriter_ApplyFault_ConcurrentSafety(t *testing.T) {
 					Fault:  faults[idx%len(faults)],
 				},
 			}
-			_ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil, 0, time.Time{})
+			_, _ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil, 0, time.Time{})
 		}(i)
 	}
 
@@ -1442,7 +1442,7 @@ func TestHTTPWriter_WriteResponse_DelayTimeout_ClientTimeout(t *testing.T) {
 			},
 		}
 		// The handler will block indefinitely; the client will time out.
-		_ = w.WriteResponse(rw, def, r, nil, 0, time.Time{})
+		_, _ = w.WriteResponse(rw, def, r, nil, 0, time.Time{})
 	})
 
 	ts := httptest.NewServer(mux)
@@ -1477,7 +1477,7 @@ func TestHTTPWriter_WriteResponse_DelayTimeout_ServerShutdown(t *testing.T) {
 				Delay: &spec.DelayDefinition{Type: "timeout"},
 			},
 		}
-		_ = w.WriteResponse(rw, def, r, nil, 0, time.Time{})
+		_, _ = w.WriteResponse(rw, def, r, nil, 0, time.Time{})
 	})
 
 	ts := httptest.NewServer(mux)
@@ -1522,7 +1522,7 @@ func TestHTTPWriter_WriteResponse_FaultMalformed_HijackerAvailable(t *testing.T)
 	hj := &mockHijacker{ResponseWriter: rr}
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1548,7 +1548,7 @@ func TestHTTPWriter_WriteResponse_FaultMalformed_HijackerNotAvailable(t *testing
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1592,7 +1592,7 @@ func TestHTTPWriter_WriteResponse_FaultMalformed_WithDelay(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
 	start := time.Now()
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -1627,7 +1627,7 @@ func TestHTTPWriter_WriteResponse_FaultMalformed_NotGzipped(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1732,7 +1732,7 @@ func TestHTTPWriter_WriteResponse_FaultRandomData_HijackerAvailable(t *testing.T
 	hj := &mockHijacker{ResponseWriter: rr}
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1759,7 +1759,7 @@ func TestHTTPWriter_WriteResponse_FaultRandomData_HijackerNotAvailable(t *testin
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1800,7 +1800,7 @@ func TestHTTPWriter_WriteResponse_FaultRandomData_DefaultDataLength(t *testing.T
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -1829,7 +1829,7 @@ func TestHTTPWriter_WriteResponse_FaultRandomData_SeedDeterminism(t *testing.T) 
 
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		_ = w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+		_, _ = w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 		return rr.Body.String()
 	}
 
@@ -1858,7 +1858,7 @@ func TestHTTPWriter_WriteResponse_FaultRandomData_WithDelay(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
 	start := time.Now()
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -1894,7 +1894,7 @@ func TestHTTPWriter_WriteResponse_FaultRandomData_NotGzipped(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -2015,7 +2015,7 @@ func TestHTTPWriter_WriteResponse_FaultSlowClose_HijackerAvailable(t *testing.T)
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
 	start := time.Now()
-	err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -2052,7 +2052,7 @@ func TestHTTPWriter_WriteResponse_FaultSlowClose_DefaultDelayMs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
 	start := time.Now()
-	err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -2089,7 +2089,7 @@ func TestHTTPWriter_WriteResponse_FaultSlowClose_HijackerNotAvailable(t *testing
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -2127,7 +2127,7 @@ func TestHTTPWriter_WriteResponse_FaultSlowClose_WithDelay(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
 	start := time.Now()
-	err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -2166,7 +2166,7 @@ func TestHTTPWriter_WriteResponse_FaultSlowClose_NotGzipped(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(hj, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -2254,7 +2254,7 @@ func TestHTTPWriter_WriteResponse_FaultSlowClose_ConcurrentSafety(t *testing.T) 
 					Fault:  &spec.FaultDefinition{Type: "slow_close", DelayMs: 10},
 				},
 			}
-			_ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil, 0, time.Time{})
+			_, _ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil, 0, time.Time{})
 		}(i)
 	}
 
@@ -2287,7 +2287,7 @@ func TestHTTPWriter_WriteResponse_DelayDribble_BasicChunking(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
 	start := time.Now()
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -2331,7 +2331,7 @@ func TestHTTPWriter_WriteResponse_DelayDribble_ZeroChunks(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
 	start := time.Now()
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -2369,7 +2369,7 @@ func TestHTTPWriter_WriteResponse_DelayDribble_ClientDisconnect(t *testing.T) {
 				},
 			},
 		}
-		_ = w.WriteResponse(rw, def, r, nil, 0, time.Time{})
+		_, _ = w.WriteResponse(rw, def, r, nil, 0, time.Time{})
 	})
 
 	ts := httptest.NewServer(mux)
@@ -2419,7 +2419,7 @@ func TestHTTPWriter_WriteResponse_DelayDribble_WithFault(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -2457,7 +2457,7 @@ func TestHTTPWriter_WriteResponse_DelayDribble_Base64Body(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -2487,7 +2487,7 @@ func TestHTTPWriter_WriteResponse_DelayDribble_EmptyBody(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 
-	err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
+	_, err := w.WriteResponse(rr, def, req, nil, 0, time.Time{})
 	if err != nil {
 		t.Fatalf("WriteResponse failed: %v", err)
 	}
@@ -2518,7 +2518,7 @@ func TestHTTPWriter_WriteResponse_DelayDribble_ConcurrentSafety(t *testing.T) {
 					},
 				},
 			}
-			_ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil, 0, time.Time{})
+			_, _ = w.WriteResponse(rr, def, httptest.NewRequest(http.MethodGet, "/test", nil), nil, 0, time.Time{})
 		}(i)
 	}
 

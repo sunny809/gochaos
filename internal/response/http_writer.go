@@ -59,6 +59,12 @@ type faultResult struct {
 	// fully written, the connection should be hijacked, held open for this
 	// many milliseconds, then closed. This implements the "slow_close" fault.
 	slowCloseMs int
+
+	// faultType is the type of fault that was applied (for logging).
+	faultType string
+
+	// activationMode is the mode that caused the fault to fire (for logging).
+	activationMode spec.ActivationMode
 }
 
 // delayResult captures the outcome of applyDelay for use by WriteResponse.
@@ -110,7 +116,7 @@ func (w *HTTPWriter) rngFill(p []byte) {
 // The serverStart parameter is the time the server was started, used by
 // the activeBetween time-window activation mode to compute elapsed time
 // since server boot.
-func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinition, req *http.Request, corsOpts *CORSOptions, hitCount uint64, serverStart time.Time) error {
+func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinition, req *http.Request, corsOpts *CORSOptions, hitCount uint64, serverStart time.Time) (FaultInjectionInfo, error) {
 	resp := def.Response
 
 	// 1. Apply delay before writing anything (simulates network latency).
@@ -122,13 +128,22 @@ func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinit
 	// instead of short-circuiting, so the normal response is written first.
 	fr := w.applyFault(rw, resp.Fault, req, hitCount, serverStart)
 	if fr.applied {
-		return nil
+		// Return fault injection info if a fault was applied (short-circuited)
+		return FaultInjectionInfo{
+			Injected:       true,
+			FaultType:      fr.faultType,
+			ActivationMode: fr.activationMode,
+		}, nil
 	}
+
+	// Check if slow_close is pending - this is still a fault injection
+	// but doesn't short-circuit, so we return info but continue writing
+	slowClosePending := fr.slowCloseMs > 0
 
 	// 3. Wrap with gzip only if no fault was applied and no slow_close is pending
 	// (slow_close needs to flush the full response before hijacking, and gzip
 	// buffering would interfere with the hijack timing).
-	if fr.slowCloseMs > 0 {
+	if slowClosePending {
 		rw.Header().Set("Connection", "close")
 		if f, ok := rw.(http.Flusher); ok {
 			defer f.Flush()
@@ -162,7 +177,7 @@ func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinit
 	// 6. Body — check for dribble mode first.
 	if dr.dribble != nil {
 		if err := w.writeDribbleBody(rw, resp, req, def.ID, dr.dribble); err != nil {
-			return err
+			return FaultInjectionInfo{}, err
 		}
 	} else if resp.Body != "" {
 		body := resp.Body
@@ -176,7 +191,7 @@ func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinit
 		}
 		_, err := io.Copy(rw, strings.NewReader(body))
 		if err != nil {
-			return fmt.Errorf("failed to write response body: %w", err)
+			return FaultInjectionInfo{}, fmt.Errorf("failed to write response body: %w", err)
 		}
 	} else if resp.Base64Body != "" {
 		decoded, err := base64.StdEncoding.DecodeString(resp.Base64Body)
@@ -185,17 +200,24 @@ func (w *HTTPWriter) WriteResponse(rw http.ResponseWriter, def *spec.StubDefinit
 		} else {
 			_, err = rw.Write(decoded)
 			if err != nil {
-				return fmt.Errorf("failed to write base64 response body: %w", err)
+				return FaultInjectionInfo{}, fmt.Errorf("failed to write base64 response body: %w", err)
 			}
 		}
 	}
 
 	// 7. Post-write: apply slow_close if pending.
-	if fr.slowCloseMs > 0 {
+	if slowClosePending {
 		w.applySlowClose(rw, fr.slowCloseMs)
+		// Return fault injection info for slow_close
+		return FaultInjectionInfo{
+			Injected:       true,
+			FaultType:      "slow_close",
+			ActivationMode: fr.activationMode,
+		}, nil
 	}
 
-	return nil
+	// Return empty FaultInjectionInfo if no fault was applied
+	return FaultInjectionInfo{}, nil
 }
 
 // writeDribbleBody writes the response body in chunks with delays between them.
@@ -395,7 +417,7 @@ func (w *HTTPWriter) applyDelay(delay *spec.DelayDefinition, ctx context.Context
 //
 // When the fault has an Activation configuration, ShouldActivate is called
 // first to determine whether the fault should fire. If ShouldActivate returns
-// false, the fault is skipped and normal response writing proceeds.
+// ShouldFire=false, the fault is skipped and normal response writing proceeds.
 //
 // The hitCount parameter is the current hit count for the matched stub,
 // used by the everyNthRequest activation mode.
@@ -408,8 +430,16 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 	}
 
 	// Check activation criteria — if the fault should not fire, skip it.
-	if !ShouldActivate(fault.Activation, w.rng, hitCount, serverStart) {
+	activateResult := ShouldActivate(fault.Activation, w.rng, hitCount, serverStart)
+	if !activateResult.ShouldFire {
 		return faultResult{}
+	}
+
+	// Prepare common result fields for all fault types
+	result := faultResult{
+		applied:       true,
+		faultType:     fault.Type,
+		activationMode: activateResult.Mode,
 	}
 
 	switch fault.Type {
@@ -417,14 +447,14 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(http.StatusInternalServerError)
 		_, _ = rw.Write([]byte(`{"error":"internal server error","fault":"error"}`))
-		return faultResult{applied: true}
+		return result
 	case "empty":
 		// Send an empty response: no headers, no explicit status (Go defaults to 200),
 		// no body. Optionally flush to ensure the response is sent immediately.
 		if f, ok := rw.(http.Flusher); ok {
 			f.Flush()
 		}
-		return faultResult{applied: true}
+		return result
 	case "connection_reset":
 		// Attempt to Hijack the underlying TCP connection and close it,
 		// causing the client to receive a TCP RST (connection reset by peer).
@@ -438,11 +468,11 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 				rw.Header().Set("Content-Type", "application/json")
 				rw.WriteHeader(http.StatusInternalServerError)
 				_, _ = rw.Write([]byte(`{"error":"connection reset by peer","fault":"connection_reset"}`))
-				return faultResult{applied: true}
+				return result
 			}
 			// Successfully hijacked — close the connection to send TCP RST.
 			_ = conn.Close()
-			return faultResult{applied: true}
+			return result
 		}
 		// Hijacker not available (e.g. wrapped ResponseWriter in tests or proxies).
 		// Fall back to a 500 response with Connection: close.
@@ -451,7 +481,7 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(http.StatusInternalServerError)
 		_, _ = rw.Write([]byte(`{"error":"connection reset by peer","fault":"connection_reset"}`))
-		return faultResult{applied: true}
+		return result
 	case "malformed":
 		// Send a malformed HTTP response to simulate protocol-level corruption.
 		// When Hijack is available, we write an invalid HTTP response directly
@@ -468,7 +498,7 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 				rw.WriteHeader(http.StatusOK)
 				// Write only half of what Content-Length promised.
 				_, _ = rw.Write([]byte(`{"partial":`))
-				return faultResult{applied: true}
+				return result
 			}
 			// Write a malformed HTTP response directly to the connection.
 			// Content-Length says 100 bytes but we only send 15, then close.
@@ -478,7 +508,7 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 				_ = bufrw.Flush()
 			}
 			_ = conn.Close()
-			return faultResult{applied: true}
+			return result
 		}
 		// Hijacker not available — fall back to truncated response.
 		w.logger.Warn("hijacker not available for malformed fault, falling back to truncated response")
@@ -487,7 +517,7 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 		rw.WriteHeader(http.StatusOK)
 		// Write only a partial JSON body — less than Content-Length promised.
 		_, _ = rw.Write([]byte(`{"partial":`))
-		return faultResult{applied: true}
+		return result
 	case "random_data":
 		// Send N bytes of random garbage data, then close the connection.
 		// This simulates a scenario where a proxy or middleware injects
@@ -508,7 +538,7 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 				garbage := make([]byte, dataLen)
 				w.rngFill(garbage)
 				_, _ = fmt.Fprintf(rw, "%x", garbage[:dataLen/2]) // hex-encoded, half length
-				return faultResult{applied: true}
+				return result
 			}
 			// Generate random bytes and write directly to the TCP connection.
 			garbage := make([]byte, dataLen)
@@ -518,7 +548,7 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 				_ = bufrw.Flush()
 			}
 			_ = conn.Close()
-			return faultResult{applied: true}
+			return result
 		}
 		// Hijacker not available — fall back to 500 + random hex body.
 		w.logger.Warn("hijacker not available for random_data fault, falling back to 500 random hex")
@@ -528,7 +558,7 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 		garbage := make([]byte, dataLen)
 		w.rngFill(garbage)
 		_, _ = fmt.Fprintf(rw, "%x", garbage[:dataLen/2]) // hex-encoded, half length
-		return faultResult{applied: true}
+		return result
 	case "slow_close":
 		// Slow close: send the complete response normally, then delay before
 		// closing the connection. This simulates a server that is slow to
@@ -542,7 +572,9 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 		if delayMs <= 0 {
 			delayMs = 1000 // default 1 second
 		}
-		return faultResult{slowCloseMs: delayMs}
+		result.slowCloseMs = delayMs
+		result.applied = false // slow_close doesn't short-circuit
+		return result
 	case "rate_limit":
 		// Rate limiting is handled at the serveMock layer (before WriteResponse
 		// is called), so applyFault is a no-op for this type. If execution

@@ -11,6 +11,13 @@ import (
 	"github.com/sunny809/gochaos/internal/spec"
 )
 
+// FaultInjectionInfo contains information about a fault that was injected.
+type FaultInjectionInfo struct {
+	Injected       bool
+	FaultType      string
+	ActivationMode spec.ActivationMode
+}
+
 // Writer is the port for writing HTTP responses.
 type Writer interface {
 	// WriteResponse writes the stub response to the client.
@@ -26,7 +33,9 @@ type Writer interface {
 	// The serverStart parameter is the time the server was started, used by
 	// the activeBetween time-window activation mode to compute elapsed time
 	// since server boot.
-	WriteResponse(w http.ResponseWriter, def *spec.StubDefinition, req *http.Request, corsOpts *CORSOptions, hitCount uint64, serverStart time.Time) error
+	//
+	// Returns FaultInjectionInfo if a fault was injected (for logging purposes).
+	WriteResponse(w http.ResponseWriter, def *spec.StubDefinition, req *http.Request, corsOpts *CORSOptions, hitCount uint64, serverStart time.Time) (FaultInjectionInfo, error)
 
 	// WriteCORSHeaders writes CORS headers for a preflight OPTIONS response.
 	WriteCORSHeaders(w http.ResponseWriter, r *http.Request, opts *CORSOptions)

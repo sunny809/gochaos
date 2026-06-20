@@ -78,3 +78,26 @@ type NearMissResult = spec.NearMissResult
 
 // DimensionScore breaks down a near-miss score by matching dimension.
 type DimensionScore = spec.DimensionScore
+
+// --- Chaos Observability types ---
+
+// ActivationMode describes the mode by which a fault was activated.
+type ActivationMode = spec.ActivationMode
+
+// Activation mode constants.
+const (
+	ModeAlways      = spec.ModeAlways
+	ModeProbability  = spec.ModeProbability
+	ModeNthRequest   = spec.ModeNthRequest
+	ModeTimeWindow   = spec.ModeTimeWindow
+	ModeCombined     = spec.ModeCombined
+)
+
+// FaultInjectionEntry represents a single fault injection event for logging purposes.
+type FaultInjectionEntry = spec.FaultInjectionEntry
+
+// FaultPattern defines a pattern for verifying fault injection behavior.
+type FaultPattern = spec.FaultPattern
+
+// FaultVerificationResult contains the outcome of a fault verification assertion.
+type FaultVerificationResult = spec.FaultVerificationResult

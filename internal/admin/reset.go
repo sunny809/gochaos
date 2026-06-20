@@ -6,10 +6,11 @@ import (
 )
 
 // reset handles POST /__admin/reset.
-// Clears all stubs, request log, and any registered reset hooks (e.g., scenarios).
+// Clears all stubs, request log, fault injection log, and any registered reset hooks (e.g., scenarios).
 func (h *Handler) reset(w http.ResponseWriter, r *http.Request) {
 	h.registry.DeleteAll()
 	h.requestLog.Clear()
+	h.faultLog.Clear()
 
 	for _, fn := range h.resetFns {
 		fn()

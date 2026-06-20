@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sunny809/gochaos/internal/faultlog"
 	"github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
 	"github.com/sunny809/gochaos/internal/spec"
@@ -16,8 +17,9 @@ import (
 func setupTest() (*Handler, *stub.Registry, *log.RequestLog) {
 	registry := stub.NewRegistry()
 	requestLog := log.New(100)
+	faultLog := faultlog.NewFaultInjectionLog(100)
 	engine := nearmiss.NewEngine()
-	h := New(registry, requestLog, engine)
+	h := New(registry, requestLog, faultLog, engine)
 	return h, registry, requestLog
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/PaesslerAG/jsonpath"
 	"github.com/sunny809/gochaos/config"
 	"github.com/sunny809/gochaos/internal/admin"
+	"github.com/sunny809/gochaos/internal/faultlog"
 	internallog "github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
 	"github.com/sunny809/gochaos/internal/randx"
@@ -51,7 +52,7 @@ type Server interface {
 	// ClearStubs removes all registered stubs.
 	ClearStubs()
 
-	// Reset clears all stubs, request log, and scenario state.
+	// Reset clears all stubs, request log, fault log, and scenario state.
 	Reset()
 
 	// Verify checks that a request matching the given pattern was received.
@@ -59,6 +60,9 @@ type Server interface {
 
 	// VerifyNotCalled checks that no request matching the given pattern was received.
 	VerifyNotCalled(pattern RequestPattern) VerificationResult
+
+	// VerifyFaultsInjected checks that faults matching the given pattern were injected.
+	VerifyFaultsInjected(pattern FaultPattern, count int) FaultVerificationResult
 
 	// RequestLog returns all logged requests.
 	RequestLog() []LoggedRequest
@@ -90,6 +94,7 @@ type mockServer struct {
 	matchEngine    *stub.Engine
 	nearMissEngine *nearmiss.Engine
 	requestLog     *internallog.RequestLog
+	faultLog       *faultlog.FaultInjectionLog
 	adminHandler   *admin.Handler
 	responseWriter response.Writer
 	globalRand     randx.RNG
@@ -111,6 +116,7 @@ func NewServer(opts ...Option) Server {
 
 	registry := stub.NewRegistry()
 	requestLog := internallog.New(cfg.MaxRequests)
+	faultLog := faultlog.NewFaultInjectionLog(cfg.MaxRequests)
 	globalRand := randx.NewGlobal(cfg.RandSeed)
 
 	return &mockServer{
@@ -120,7 +126,8 @@ func NewServer(opts ...Option) Server {
 		matchEngine:    stub.NewEngine(registry),
 		nearMissEngine: nearmiss.NewEngine(),
 		requestLog:     requestLog,
-		adminHandler:   admin.New(registry, requestLog, nearmiss.NewEngine()),
+		faultLog:       faultLog,
+		adminHandler:   admin.New(registry, requestLog, faultLog, nearmiss.NewEngine()),
 		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip, globalRand),
 		globalRand:     globalRand,
 	}
@@ -302,10 +309,11 @@ func (s *mockServer) ClearStubs() {
 	s.registry.DeleteAll()
 }
 
-// Reset clears all stubs and request log.
+// Reset clears all stubs, request log, and fault log.
 func (s *mockServer) Reset() {
 	s.registry.DeleteAll()
 	s.requestLog.Clear()
+	s.faultLog.Clear()
 }
 
 // RecordedStubs returns stubs recorded from proxy mode.
@@ -398,13 +406,35 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 		fault := result.Stub.Response.Fault
 		if s.registry.ShouldRateLimit(result.Stub.ID, fault.AfterRequests, fault.PerSecond) {
 			s.writeRateLimited(w, r, fault)
+			// Record the rate_limit fault injection
+			s.faultLog.Record(spec.FaultInjectionEntry{
+				StubID:         result.Stub.ID,
+				FaultType:      "rate_limit",
+				ActivatedAt:    time.Now(),
+				RequestMethod:  r.Method,
+				RequestPath:    r.URL.Path,
+				ActivationMode: spec.ActivationMode("rate_limit"),
+			})
 			return
 		}
 	}
 
 	// Write the matched response (with optional gzip compression)
-	if err := s.responseWriter.WriteResponse(w, result.Stub, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.startTime); err != nil {
+	faultInfo, err := s.responseWriter.WriteResponse(w, result.Stub, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.startTime)
+	if err != nil {
 		s.logger.Warn("failed to write response", "stub", result.Stub.ID, "error", err)
+	}
+
+	// Record fault injection if a fault was applied (except rate_limit which is handled above)
+	if faultInfo.Injected {
+		s.faultLog.Record(spec.FaultInjectionEntry{
+			StubID:         result.Stub.ID,
+			FaultType:      faultInfo.FaultType,
+			ActivatedAt:    time.Now(),
+			RequestMethod:  r.Method,
+			RequestPath:    r.URL.Path,
+			ActivationMode: faultInfo.ActivationMode,
+		})
 	}
 }
 
@@ -555,6 +585,54 @@ func (s *mockServer) verify(pattern RequestPattern, count int) VerificationResul
 	}
 
 	return result
+}
+
+// verifyFaultsInjected checks that faults matching the given pattern were injected.
+func (s *mockServer) verifyFaultsInjected(pattern FaultPattern, count int) FaultVerificationResult {
+	entries := s.faultLog.List()
+	actualCount := 0
+
+	for _, entry := range entries {
+		if matchFaultPattern(pattern, entry) {
+			actualCount++
+		}
+	}
+
+	result := FaultVerificationResult{
+		ExpectedCount: count,
+		ActualCount:   actualCount,
+		Matched:       actualCount >= count,
+		Pattern:       pattern,
+	}
+
+	if !result.Matched {
+		result.Errors = append(result.Errors,
+			fmt.Sprintf("expected at least %d fault injections, got %d", count, actualCount))
+	}
+
+	// Special case: count == 0 means VerifyNoFaultsInjected (exact match)
+	if count == 0 {
+		result.Matched = actualCount == 0
+		if !result.Matched {
+			result.Errors = []string{fmt.Sprintf("expected no matching fault injections, got %d", actualCount)}
+		}
+	}
+
+	return result
+}
+
+// matchFaultPattern checks if a fault injection entry matches a verification pattern.
+func matchFaultPattern(pattern FaultPattern, entry spec.FaultInjectionEntry) bool {
+	if pattern.StubID != "" && pattern.StubID != entry.StubID {
+		return false
+	}
+	if pattern.FaultType != "" && pattern.FaultType != entry.FaultType {
+		return false
+	}
+	if pattern.ActivationMode != "" && pattern.ActivationMode != string(entry.ActivationMode) {
+		return false
+	}
+	return true
 }
 
 // matchPattern checks if a logged request matches a verification pattern.

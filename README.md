@@ -266,6 +266,8 @@ server := gmock.NewServer(gmock.WithGzip(false))
 | `POST` | `/__admin/reset` | Reset all server state |
 | `GET` | `/__admin/requests` | View request log (filter: `matched`, `unmatched`) |
 | `DELETE` | `/__admin/requests` | Clear request log |
+| `GET` | `/__admin/fault-log` | View fault injection log |
+| `DELETE` | `/__admin/fault-log` | Clear fault injection log |
 | `GET` | `/__admin/health` | Health check |
 
 ## Documentation
@@ -344,6 +346,8 @@ services:
 - **5 delay distributions**: `fixed`, `random`, `timeout` (infinite hang), `lognormal` (p50/p95/p99 parameterized), `dribble` (chunked body with inter-chunk delays)
 - **3 activation modes** (AND semantics): `probability` (0.0--1.0), `everyNthRequest`, `activeBetween` (time windows with per-window probability override)
 - **Seedable RNG**: `WithRandSeed(42)` makes all chaos behavior reproducible across runs
+- **Fault injection logging**: Ring buffer records every fault event for CI assertions
+- **VerifyFaultsInjected API**: Assert on fault injection patterns in Go tests
 - Binary response body (base64)
 - Redirect response helper
 - CORS support (preflight + actual requests)
