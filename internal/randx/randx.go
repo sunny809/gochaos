@@ -70,6 +70,9 @@ func NewStub(seed int64) *Rand {
 
 // Float64 returns a pseudo-random float64 in [0.0, 1.0).
 func (r *Rand) Float64() float64 {
+	if r == nil {
+		return 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.rand.Float64()
@@ -77,6 +80,9 @@ func (r *Rand) Float64() float64 {
 
 // Intn returns a pseudo-random int in [0, n). It panics if n <= 0.
 func (r *Rand) Intn(n int) int {
+	if r == nil {
+		return 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.rand.Intn(n)

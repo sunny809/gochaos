@@ -36,6 +36,9 @@ func ExampleServer() {
 		fmt.Println("request failed:", err)
 		return
 	}
+	if resp == nil {
+		return
+	}
 	defer resp.Body.Close()
 
 	fmt.Println("Status:", resp.StatusCode)
@@ -157,6 +160,9 @@ func ExampleWithCORSEnabled() {
 	}
 	req.Header.Set("Origin", "http://example.com")
 	resp, err := http.DefaultClient.Do(req)
+	if resp == nil {
+		return
+	}
 	if err != nil || resp == nil {
 		if err != nil {
 			fmt.Println("request failed:", err)

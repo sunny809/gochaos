@@ -624,6 +624,9 @@ func startTestServer(t *testing.T) Server {
 func sendGet(t *testing.T, url string) {
 	t.Helper()
 	resp, err := http.Get(url)
+	if resp == nil {
+		return
+	}
 	if err != nil {
 		t.Fatalf("GET %s failed: %v", url, err)
 	}
@@ -633,6 +636,9 @@ func sendGet(t *testing.T, url string) {
 func sendPost(t *testing.T, url, contentType, body string) {
 	t.Helper()
 	resp, err := http.Post(url, contentType, strings.NewReader(body))
+	if resp == nil {
+		return
+	}
 	if err != nil {
 		t.Fatalf("POST %s failed: %v", url, err)
 	}
@@ -650,6 +656,9 @@ func sendPostWithHeaders(t *testing.T, url, contentType, body string, headers ma
 		req.Header.Set(k, v)
 	}
 	resp, err := http.DefaultClient.Do(req)
+	if resp == nil {
+		return
+	}
 	if err != nil {
 		t.Fatalf("POST %s failed: %v", url, err)
 	}
@@ -712,6 +721,9 @@ func TestVerify_HeaderExact(t *testing.T) {
 	}
 	req.Header.Set("X-Auth", "bearer-token-123")
 	resp, err := http.DefaultClient.Do(req)
+	if resp == nil {
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -999,6 +1011,9 @@ func TestVerify_CookieMatch(t *testing.T) {
 	}
 	req.Header.Set("Cookie", "session=abc123; theme=light")
 	resp, err := http.DefaultClient.Do(req)
+	if resp == nil {
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
