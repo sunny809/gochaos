@@ -1,0 +1,60 @@
+version: 2
+
+project_name: gmock
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: gmock
+    main: ./cmd/gmock
+    binary: gmock
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .Commit }} -X main.buildDate={{ .Date }}
+    tags:
+      - netgo
+
+archives:
+  - id: gmock
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    format_overrides:
+      - goos: darwin
+        format: zip
+    files:
+      - LICENSE
+
+dockers:
+  - image_templates:
+      - "ghcr.io/sunny809/gochaos:{{ .Version }}"
+      - "ghcr.io/sunny809/gochaos:latest"
+    dockerfile: Dockerfile
+    skip_push: auto
+    build_flag_templates:
+      - "--platform=linux/amd64"
+    extra_files:
+      - LICENSE
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  name_template: "{{ .Version }}-SNAPSHOT-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch

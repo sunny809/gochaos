@@ -85,3 +85,8 @@ jobs:
         run: go build -o gmock ./cmd/gmock
       - name: Verify CLI runs
         run: ./gmock --help
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmock-linux-amd64
+          path: gmock

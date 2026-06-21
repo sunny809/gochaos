@@ -33,3 +33,6 @@ examples/basic/basic
 examples/cors/cors
 examples/delay/delay
 examples/library/library
+
+# GoReleaser build output
+/dist/
