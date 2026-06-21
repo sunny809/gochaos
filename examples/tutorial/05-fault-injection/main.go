@@ -10,12 +10,13 @@
 //
 // Three fault types are supported:
 //
-//   "error"            — Returns HTTP 500 with a JSON error body
-//   "empty"            — Returns an empty response (no body, no headers)
-//   "connection_reset" — Closes the TCP connection abruptly (simulates network failure)
+//	"error"            — Returns HTTP 500 with a JSON error body
+//	"empty"            — Returns an empty response (no body, no headers)
+//	"connection_reset" — Closes the TCP connection abruptly (simulates network failure)
 //
 // Run:
-//   cd examples/tutorial/05-fault-injection && go run .
+//
+//	cd examples/tutorial/05-fault-injection && go run .
 package main
 
 import (

@@ -241,11 +241,11 @@ func (s *mockServer) Stop() error {
 	}
 
 	if s.listener != nil {
-		s.listener.Close()
+		_ = s.listener.Close()
 		s.listener = nil
 	}
 	if s.adminListener != nil {
-		s.adminListener.Close()
+		_ = s.adminListener.Close()
 		s.adminListener = nil
 	}
 
@@ -362,11 +362,11 @@ func (s *mockServer) NearMiss(method, path string, headers map[string]string, bo
 
 // serveMock is the main HTTP handler for mock requests.
 // Pipeline:
-//   1. Handle CORS preflight if enabled
-//   2. Log the request
-//   3. Try stub matching
-//   4. On match: write the response
-//   5. On miss: return 404 with near-miss diagnostic data
+//  1. Handle CORS preflight if enabled
+//  2. Log the request
+//  3. Try stub matching
+//  4. On match: write the response
+//  5. On miss: return 404 with near-miss diagnostic data
 func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 	// Handle CORS preflight requests
 	if s.config.CORSOptions != nil && r.Method == http.MethodOptions && r.Header.Get("Origin") != "" {
@@ -563,12 +563,12 @@ func (s *mockServer) verify(pattern RequestPattern, count int) VerificationResul
 	}
 
 	result := VerificationResult{
-		ExpectedCount:      count,
-		ActualCount:        actualCount,
-		Matched:            actualCount >= count,
-		BodyPattern:        pattern.Body,
-		HeaderPattern:      copyMap(pattern.Headers),
-		QueryParamPattern:  copyMap(pattern.QueryParams),
+		ExpectedCount:     count,
+		ActualCount:       actualCount,
+		Matched:           actualCount >= count,
+		BodyPattern:       pattern.Body,
+		HeaderPattern:     copyMap(pattern.Headers),
+		QueryParamPattern: copyMap(pattern.QueryParams),
 	}
 
 	if !result.Matched {

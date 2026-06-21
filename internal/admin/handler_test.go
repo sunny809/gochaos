@@ -106,7 +106,7 @@ func TestListMappings(t *testing.T) {
 
 	var result struct {
 		Mappings []spec.StubDefinition `json:"mappings"`
-		Meta     map[string]int         `json:"meta"`
+		Meta     map[string]int        `json:"meta"`
 	}
 	json.NewDecoder(w.Body).Decode(&result)
 	if len(result.Mappings) != 2 {
@@ -213,7 +213,7 @@ func TestListRequests(t *testing.T) {
 	}
 
 	var result struct {
-		Requests []interface{} `json:"requests"`
+		Requests []interface{}  `json:"requests"`
 		Meta     map[string]int `json:"meta"`
 	}
 	json.NewDecoder(w.Body).Decode(&result)

@@ -5,7 +5,8 @@
 // happened. The server is torn down at test end via defer.
 //
 // Run:
-//   go test -v ./examples/test
+//
+//	go test -v ./examples/test
 package mocktest
 
 import (

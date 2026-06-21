@@ -846,7 +846,7 @@ func TestShouldActivate_ActiveBetween_MultipleSegments(t *testing.T) {
 	rng := randx.NewGlobal(42)
 	activation := &spec.Activation{
 		ActiveBetween: []spec.TimeWindow{
-			{StartMs: 0, EndMs: 30000},                      // 0-30s: always-on
+			{StartMs: 0, EndMs: 30000},                       // 0-30s: always-on
 			{StartMs: 30000, EndMs: 90000, Probability: 1.0}, // 30-90s: 100% probability
 		},
 	}
@@ -929,7 +929,7 @@ func TestShouldActivate_ActiveBetween_FirstWindowWins(t *testing.T) {
 	rng := randx.NewGlobal(42)
 	activation := &spec.Activation{
 		ActiveBetween: []spec.TimeWindow{
-			{StartMs: 0, EndMs: 10000, Probability: 1.0},   // first window: 100%
+			{StartMs: 0, EndMs: 10000, Probability: 1.0},    // first window: 100%
 			{StartMs: 5000, EndMs: 15000, Probability: 0.0}, // second window: no override
 		},
 	}

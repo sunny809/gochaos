@@ -4,7 +4,8 @@
 // Cross-Origin Resource Sharing (CORS) support.
 //
 // Run:
-//   cd examples/cors && go run .
+//
+//	cd examples/cors && go run .
 package main
 
 import (
@@ -20,8 +21,8 @@ func main() {
 		gmock.WithPort(0),
 		gmock.WithCORS(gmock.CORSOptions{
 			AllowedOrigins:   []string{"https://myapp.com", "https://app.example.com"},
-			AllowedMethods: []string{"GET", "POST", "PUT", "DELETE"},
-			AllowedHeaders: []string{"Content-Type", "Authorization", "X-Request-ID"},
+			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE"},
+			AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Request-ID"},
 			AllowCredentials: true,
 			MaxAge:           3600,
 		}),

@@ -87,10 +87,10 @@ type ActivationMode = spec.ActivationMode
 // Activation mode constants.
 const (
 	ModeAlways      = spec.ModeAlways
-	ModeProbability  = spec.ModeProbability
-	ModeNthRequest   = spec.ModeNthRequest
-	ModeTimeWindow   = spec.ModeTimeWindow
-	ModeCombined     = spec.ModeCombined
+	ModeProbability = spec.ModeProbability
+	ModeNthRequest  = spec.ModeNthRequest
+	ModeTimeWindow  = spec.ModeTimeWindow
+	ModeCombined    = spec.ModeCombined
 )
 
 // FaultInjectionEntry represents a single fault injection event for logging purposes.

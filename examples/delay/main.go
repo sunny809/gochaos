@@ -4,7 +4,8 @@
 // Both fixed and random delays are supported.
 //
 // Run:
-//   cd examples/delay && go run .
+//
+//	cd examples/delay && go run .
 package main
 
 import (

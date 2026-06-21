@@ -4,7 +4,8 @@
 // HTTP mock server in a Go test or main program.
 //
 // Run:
-//   go run ./examples/library
+//
+//	go run ./examples/library
 package main
 
 import (

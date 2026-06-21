@@ -14,10 +14,10 @@ import (
 )
 
 // commonClient is the HTTP client used by all admin CLI commands.
-var commonClient = &http.Client{}
-
-// commonAdminURL holds the base URL passed via --admin-url.
-var commonAdminURL string
+var (
+	commonClient   = &http.Client{}
+	commonAdminURL string
+)
 
 // newStubCmd creates the `gmock stub` subcommand.
 func newStubCmd() *cobra.Command {
@@ -159,4 +159,3 @@ func newStubDeleteCmd() *cobra.Command {
 	cmd.Flags().Bool("all", false, "Delete all stubs")
 	return cmd
 }
-

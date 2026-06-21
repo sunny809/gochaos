@@ -181,7 +181,7 @@ func TestBinary_Admin_CRUD(t *testing.T) {
 	}
 	var list struct {
 		Mappings []map[string]interface{} `json:"mappings"`
-		Meta     map[string]int          `json:"meta"`
+		Meta     map[string]int           `json:"meta"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		t.Fatalf("decode list: %v", err)

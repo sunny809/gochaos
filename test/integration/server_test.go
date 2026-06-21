@@ -165,7 +165,9 @@ func TestAdminCreateAndListMappings(t *testing.T) {
 
 	// Now actually use the stub
 	resp, err := http.Get(server.URL() + "/api/admin-test")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "from-admin" {
@@ -199,7 +201,9 @@ func TestAdminDeleteMapping(t *testing.T) {
 
 	// Stub should be gone — request now returns 404
 	resp, err := http.Get(server.URL() + "/test")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404 after delete, got %d", resp.StatusCode)
@@ -302,7 +306,9 @@ func TestAdminListRequests(t *testing.T) {
 
 	// Filter unmatched
 	resp2, err := http.Get(server.AdminURL() + "/__admin/requests?filter=unmatched")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp2.Body.Close()
 	json.NewDecoder(resp2.Body).Decode(&list)
 	if len(list.Requests) != 1 {
@@ -395,7 +401,9 @@ func TestPriorityOrdering(t *testing.T) {
 
 	// Without the special header, only the general stub matches
 	resp2, err := http.Get(server.URL() + "/api/users")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp2.Body.Close()
 	body2, _ := io.ReadAll(resp2.Body)
 	if string(body2) != "general" {
@@ -672,9 +680,9 @@ func TestAcceptHeaderMatching(t *testing.T) {
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
-			Method: http.MethodGet,
+			Method:  http.MethodGet,
 			URLPath: "/api/data",
-			Accept: "application/json",
+			Accept:  "application/json",
 		},
 		Response: gmock.ResponseDefinition{
 			Status: http.StatusOK,
@@ -684,9 +692,9 @@ func TestAcceptHeaderMatching(t *testing.T) {
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
-			Method: http.MethodGet,
+			Method:  http.MethodGet,
 			URLPath: "/api/data",
-			Accept: "text/xml",
+			Accept:  "text/xml",
 		},
 		Response: gmock.ResponseDefinition{
 			Status: http.StatusOK,
@@ -1039,11 +1047,11 @@ type nearMissAdminResponse struct {
 }
 
 type nearMissEntry struct {
-	StubID    string           `json:"stubId"`
-	StubName  string           `json:"stubName,omitempty"`
-	Score     int              `json:"score"`
-	MaxScore  int              `json:"maxScore"`
-	Breakdown []breakdownDim   `json:"breakdown"`
+	StubID    string         `json:"stubId"`
+	StubName  string         `json:"stubName,omitempty"`
+	Score     int            `json:"score"`
+	MaxScore  int            `json:"maxScore"`
+	Breakdown []breakdownDim `json:"breakdown"`
 }
 
 type breakdownDim struct {
@@ -1101,8 +1109,8 @@ func TestNearMiss_MethodMismatch(t *testing.T) {
 	defer cleanup()
 
 	server.Stub(gmock.StubDefinition{
-		Name:    "create-user",
-		Request: gmock.RequestPattern{Method: http.MethodPost, URLPath: "/api/users"},
+		Name:     "create-user",
+		Request:  gmock.RequestPattern{Method: http.MethodPost, URLPath: "/api/users"},
 		Response: gmock.ResponseDefinition{Status: http.StatusCreated},
 	})
 
@@ -1140,8 +1148,8 @@ func TestNearMiss_PathMismatch(t *testing.T) {
 	defer cleanup()
 
 	server.Stub(gmock.StubDefinition{
-		Name:    "list-users",
-		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/users"},
+		Name:     "list-users",
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/users"},
 		Response: gmock.ResponseDefinition{Status: http.StatusOK},
 	})
 
@@ -1320,8 +1328,8 @@ func TestNearMiss_404ResponseIncludesNearMiss(t *testing.T) {
 
 	// Register a stub that will nearly match.
 	server.Stub(gmock.StubDefinition{
-		Name:    "list-users",
-		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/users"},
+		Name:     "list-users",
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/users"},
 		Response: gmock.ResponseDefinition{Status: http.StatusOK},
 	})
 
@@ -1468,8 +1476,8 @@ func TestRateLimit_Default429(t *testing.T) {
 			Status: 200,
 			Body:   `{"ok":true}`,
 			Fault: &gmock.FaultDefinition{
-				Type:         "rate_limit",
-				PerSecond:    2,
+				Type:      "rate_limit",
+				PerSecond: 2,
 			},
 		},
 	})
@@ -1522,8 +1530,8 @@ func TestRateLimit_CustomStatus(t *testing.T) {
 			Status: 200,
 			Body:   `{"ok":true}`,
 			Fault: &gmock.FaultDefinition{
-				Type:           "rate_limit",
-				PerSecond:      1,
+				Type:            "rate_limit",
+				PerSecond:       1,
 				RateLimitStatus: 503,
 			},
 		},

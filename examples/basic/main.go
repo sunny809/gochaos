@@ -5,7 +5,8 @@
 // and verifies the interaction.
 //
 // Run:
-//   cd examples/basic && go run .
+//
+//	cd examples/basic && go run .
 package main
 
 import (

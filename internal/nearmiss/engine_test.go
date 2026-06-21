@@ -61,8 +61,8 @@ func stubMethodOnly(id, method string) spec.StubDefinition {
 // TestCompute_BestCandidateFirst — AC #1
 func TestCompute_BestCandidateFirst(t *testing.T) {
 	stubs := []spec.StubDefinition{
-		stubGET("low", "/orders"),  // method matches (10), path miss → score 10/40
-		stubGET("high", "/users"),  // method matches (10), path matches (30) → 40/40 — full match, omitted
+		stubGET("low", "/orders"),     // method matches (10), path miss → score 10/40
+		stubGET("high", "/users"),     // method matches (10), path matches (30) → 40/40 — full match, omitted
 		stubMethodOnly("only", "GET"), // method matches (10) → 10/10 — full match, omitted
 		{
 			ID: "mid",

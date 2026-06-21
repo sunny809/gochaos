@@ -961,8 +961,8 @@ func TestVerify_URLPathRegex(t *testing.T) {
 
 	t.Run("matching regex", func(t *testing.T) {
 		result := server.Verify(RequestPattern{
-			Method:        "GET",
-			URLPathRegex:  "^/api/users/",
+			Method:       "GET",
+			URLPathRegex: "^/api/users/",
 		}, 1)
 		if !result.Matched {
 			t.Error("expected URLPathRegex to verify, got errors:", result.Errors)
@@ -971,8 +971,8 @@ func TestVerify_URLPathRegex(t *testing.T) {
 
 	t.Run("non-matching regex", func(t *testing.T) {
 		result := server.Verify(RequestPattern{
-			Method:        "GET",
-			URLPathRegex:  "^/api/admins/",
+			Method:       "GET",
+			URLPathRegex: "^/api/admins/",
 		}, 1)
 		if result.Matched {
 			t.Error("expected non-matching URLPathRegex to not verify")
@@ -1026,4 +1026,3 @@ func TestVerify_CookieMatch(t *testing.T) {
 		}
 	})
 }
-

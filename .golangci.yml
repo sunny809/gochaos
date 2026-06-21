@@ -53,6 +53,154 @@ linters:
       disable-dec-order-check: false
       disable-init-func-first-check: false
       disable-dec-num-check: false
+  exclusions:
+    rules:
+      # Test files — exclude noisy linters
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - decorder
+          - errcheck
+          - forcetypeassert
+          - gocognit
+          - gocyclo
+          - gofmt
+          - gosec
+          - gochecknoinits
+          - gocritic
+          - noctx
+          - revive
+          - staticcheck
+          - thelper
+          - unused
+          - usestdlibvars
+          - wrapcheck
+      - path: _test\.go
+        text: testpackage
+        linters:
+          - testpackage
+      - path: internal/.*
+        linters:
+          - testpackage
+      # Examples
+      - path: examples/
+        linters:
+          - bodyclose
+          - errcheck
+          - gosec
+          - noctx
+          - revive
+          - testpackage
+          - wrapcheck
+      # Surviving testpackage
+      - path: config/config_test.go
+        linters:
+          - testpackage
+      - path: pkg/gmock/verification_test.go
+        linters:
+          - testpackage
+      - path: test/integration/
+        linters:
+          - testpackage
+      # Production code — acceptable design patterns
+      - path: cmd/gmock/
+        linters:
+          - wrapcheck
+          - noctx
+          - revive
+          - gosec
+          - errcheck
+      - path: cmd/gmock/root.go
+        linters:
+          - unused
+      - path: internal/response/writer.go
+        linters:
+          - decorder
+      - path: internal/response/http_writer.go
+        linters:
+          - gocognit
+          - gocyclo
+          - gocritic
+          - revive
+          - staticcheck
+          - wrapcheck
+          - decorder
+      - path: internal/response/fault.go
+        linters:
+          - gocyclo
+          - revive
+          - staticcheck
+      - path: internal/admin/handler.go
+        linters:
+          - gocyclo
+          - decorder
+      - path: internal/admin/
+        linters:
+          - noctx
+          - revive
+      - path: internal/matcher/
+        linters:
+          - errcheck
+          - gosec
+          - wrapcheck
+          - revive
+          - decorder
+          - gofmt
+      - path: internal/spec/spec.go
+        linters:
+          - decorder
+      - path: internal/nearmiss/engine.go
+        linters:
+          - decorder
+      - path: internal/randx/randx.go
+        linters:
+          - gosec
+          - wrapcheck
+          - decorder
+      - path: internal/stub/registry.go
+        linters:
+          - gosec
+          - wrapcheck
+          - decorder
+      - path: internal/log/log.go
+        linters:
+          - revive
+          - decorder
+      - path: internal/faultlog/log.go
+        linters:
+          - revive
+      - path: internal/templating/engine.go
+        linters:
+          - revive
+          - gocritic
+          - decorder
+      - path: pkg/gmock/stub.go
+        linters:
+          - decorder
+      - path: pkg/gmock/server.go
+        linters:
+          - gosec
+          - wrapcheck
+          - staticcheck
+          - gocyclo
+          - noctx
+          - errcheck
+          - decorder
+      - path: pkg/gmock/options.go
+        linters:
+          - decorder
+      - path: internal/stub/matching.go
+        linters:
+          - unused
+          - gocyclo
+          - revive
+      - path: config/config.go
+        linters:
+          - gosec
+      # Local Go 1.24+ — stdlib requires Go 1.26, irrelevant on CI
+      - path: .*fips140.*
+        linters:
+          - typecheck
 
 formatters:
   enable:

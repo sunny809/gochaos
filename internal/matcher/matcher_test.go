@@ -19,11 +19,11 @@ func makeRequestWithBody(method, path, body string) *http.Request {
 
 func TestMethodMatcher(t *testing.T) {
 	tests := []struct {
-		name     string
+		name       string
 		stubMethod string
 		reqMethod  string
-		want      bool
-		wantScore int
+		want       bool
+		wantScore  int
 	}{
 		{"exact match", "GET", "GET", true, 10},
 		{"case insensitive", "get", "GET", true, 10},
@@ -115,12 +115,12 @@ func TestPathRegexMatcherInvalid(t *testing.T) {
 
 func TestHeaderMatcher(t *testing.T) {
 	tests := []struct {
-		name      string
-		header    string
-		pattern   string
+		name       string
+		header     string
+		pattern    string
 		reqHeaders map[string]string
-		want      bool
-		wantScore int
+		want       bool
+		wantScore  int
 	}{
 		{"exact match", "Authorization", "Bearer xyz", map[string]string{"Authorization": "Bearer xyz"}, true, 5},
 		{"different value", "Authorization", "Bearer xyz", map[string]string{"Authorization": "Bearer abc"}, false, 0},

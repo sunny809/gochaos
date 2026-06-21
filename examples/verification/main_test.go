@@ -4,7 +4,8 @@
 // in tests to assert that expected requests were made.
 //
 // Run:
-//   cd examples/verification && go test -v
+//
+//	cd examples/verification && go test -v
 package verification_test
 
 import (

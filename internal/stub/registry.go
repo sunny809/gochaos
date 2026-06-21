@@ -38,7 +38,7 @@ type Record struct {
 // Each stub that uses the "rate_limit" fault type gets its own rateLimitState
 // entry, lazily created on the first ShouldRateLimit call.
 type rateLimitState struct {
-	tokens    float64
+	tokens     float64
 	lastRefill time.Time
 }
 
@@ -47,8 +47,8 @@ type rateLimitState struct {
 type Registry struct {
 	mu      sync.RWMutex
 	stubs   map[string]*Record
-	ordered []*Record          // sorted by priority then insertion
-	nextSeq uint64             // monotonic counter for insertion ordering
+	ordered []*Record // sorted by priority then insertion
+	nextSeq uint64    // monotonic counter for insertion ordering
 
 	// rateLimitMu protects rateLimitStates. This is a separate lock from the
 	// main stub mu to avoid holding the read lock during token-bucket

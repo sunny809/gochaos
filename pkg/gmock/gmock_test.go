@@ -11,9 +11,9 @@ func TestStubDefinitionRoundTrip(t *testing.T) {
 	stub := gmock.StubDefinition{
 		Name: "test-stub",
 		Request: gmock.RequestPattern{
-			Method:  "GET",
-			URLPath: "/api/users",
-			Headers: map[string]string{"Authorization": "Bearer *"},
+			Method:      "GET",
+			URLPath:     "/api/users",
+			Headers:     map[string]string{"Authorization": "Bearer *"},
 			QueryParams: map[string]string{"page": "1"},
 		},
 		Response: gmock.ResponseDefinition{

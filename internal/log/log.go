@@ -63,7 +63,7 @@ func (l *RequestLog) Record(req *http.Request, matched bool, stubID string) {
 		body, err := io.ReadAll(req.Body)
 		if err == nil {
 			entry.Request.Body = string(body)
-			req.Body.Close()
+			_ = req.Body.Close()
 			// Restore body for downstream handlers
 			req.Body = io.NopCloser(strings.NewReader(string(body)))
 		}

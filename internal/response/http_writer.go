@@ -437,8 +437,8 @@ func (w *HTTPWriter) applyFault(rw http.ResponseWriter, fault *spec.FaultDefinit
 
 	// Prepare common result fields for all fault types
 	result := faultResult{
-		applied:       true,
-		faultType:     fault.Type,
+		applied:        true,
+		faultType:      fault.Type,
 		activationMode: activateResult.Mode,
 	}
 

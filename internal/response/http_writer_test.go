@@ -138,7 +138,7 @@ func TestHTTPWriter_WriteResponse(t *testing.T) {
 			wantStatus: 200,
 			wantBody:   "cors",
 			wantHeader: map[string]string{
-				"Access-Control-Allow-Origin": "*",
+				"Access-Control-Allow-Origin":   "*",
 				"Access-Control-Expose-Headers": "X-Custom",
 			},
 		},
@@ -197,10 +197,10 @@ func TestHTTPWriter_WriteResponse_Delay(t *testing.T) {
 	w := NewHTTPWriter(logger, true, nil)
 
 	tests := []struct {
-		name         string
-		delay        *spec.DelayDefinition
-		minDuration  time.Duration
-		maxDuration  time.Duration
+		name        string
+		delay       *spec.DelayDefinition
+		minDuration time.Duration
+		maxDuration time.Duration
 	}{
 		{
 			name: "fixed delay",
@@ -292,14 +292,14 @@ func TestHTTPWriter_WriteCORSHeaders(t *testing.T) {
 	w := NewHTTPWriter(logger, true, nil)
 
 	tests := []struct {
-		name       string
-		origin     string
-		corsOpts   *CORSOptions
-		wantOrigin string
-		wantMethods string
-		wantHeaders string
+		name            string
+		origin          string
+		corsOpts        *CORSOptions
+		wantOrigin      string
+		wantMethods     string
+		wantHeaders     string
 		wantCredentials string
-		wantMaxAge string
+		wantMaxAge      string
 	}{
 		{
 			name:       "nil options",
@@ -332,15 +332,15 @@ func TestHTTPWriter_WriteCORSHeaders(t *testing.T) {
 			wantOrigin: "",
 		},
 		{
-			name:            "all options",
-			origin:          "http://example.com",
+			name:   "all options",
+			origin: "http://example.com",
 			corsOpts: &CORSOptions{
 				AllowedOrigins:   []string{"*"},
 				AllowedMethods:   []string{"GET", "POST", "DELETE"},
 				AllowedHeaders:   []string{"Content-Type", "Authorization"},
 				ExposedHeaders:   []string{"X-Total"},
 				AllowCredentials: true,
-				MaxAge:         3600,
+				MaxAge:           3600,
 			},
 			wantOrigin:      "*",
 			wantMethods:     "GET, POST, DELETE",
@@ -556,42 +556,42 @@ func TestHTTPWriter_WriteResponse_TemplateRendering(t *testing.T) {
 		wantExact    string
 	}{
 		{
-			name:         "transform disabled - body returned as-is",
-			body:         `Method: {{.Request.Method}}`,
-			transform:    false,
-			method:       http.MethodPost,
-			wantExact:    `Method: {{.Request.Method}}`,
+			name:      "transform disabled - body returned as-is",
+			body:      `Method: {{.Request.Method}}`,
+			transform: false,
+			method:    http.MethodPost,
+			wantExact: `Method: {{.Request.Method}}`,
 		},
 		{
-			name:         "transform enabled - request method",
-			body:         `Method: {{.Request.Method}}`,
-			transform:    true,
-			method:       http.MethodPost,
-			wantExact:    `Method: POST`,
+			name:      "transform enabled - request method",
+			body:      `Method: {{.Request.Method}}`,
+			transform: true,
+			method:    http.MethodPost,
+			wantExact: `Method: POST`,
 		},
 		{
-			name:         "transform enabled - request path",
-			body:         `Path: {{.Request.Path}}`,
-			transform:    true,
-			method:       http.MethodGet,
-			path:         "/api/users",
-			wantExact:    `Path: /api/users`,
+			name:      "transform enabled - request path",
+			body:      `Path: {{.Request.Path}}`,
+			transform: true,
+			method:    http.MethodGet,
+			path:      "/api/users",
+			wantExact: `Path: /api/users`,
 		},
 		{
-			name:         "transform enabled - request header",
-			body:         `Auth: {{.Request.Header "Authorization"}}`,
-			transform:    true,
-			method:       http.MethodGet,
-			headers:      map[string]string{"Authorization": "Bearer xyz"},
-			wantExact:    `Auth: Bearer xyz`,
+			name:      "transform enabled - request header",
+			body:      `Auth: {{.Request.Header "Authorization"}}`,
+			transform: true,
+			method:    http.MethodGet,
+			headers:   map[string]string{"Authorization": "Bearer xyz"},
+			wantExact: `Auth: Bearer xyz`,
 		},
 		{
-			name:         "transform enabled - request query",
-			body:         `Page: {{.Request.Query "page"}}`,
-			transform:    true,
-			method:       http.MethodGet,
-			query:        "page=42",
-			wantExact:    `Page: 42`,
+			name:      "transform enabled - request query",
+			body:      `Page: {{.Request.Query "page"}}`,
+			transform: true,
+			method:    http.MethodGet,
+			query:     "page=42",
+			wantExact: `Page: 42`,
 		},
 		{
 			name:         "transform enabled - randomUUID produces valid UUID",
@@ -615,11 +615,11 @@ func TestHTTPWriter_WriteResponse_TemplateRendering(t *testing.T) {
 			wantContains: "",
 		},
 		{
-			name:         "transform with invalid template logs warning and returns raw",
-			body:         `{{.Request.Method`,
-			transform:    true,
-			method:       http.MethodGet,
-			wantExact:    `{{.Request.Method`,
+			name:      "transform with invalid template logs warning and returns raw",
+			body:      `{{.Request.Method`,
+			transform: true,
+			method:    http.MethodGet,
+			wantExact: `{{.Request.Method`,
 		},
 	}
 
@@ -640,8 +640,8 @@ func TestHTTPWriter_WriteResponse_TemplateRendering(t *testing.T) {
 			def := &spec.StubDefinition{
 				ID: "template-stub",
 				Response: spec.ResponseDefinition{
-					Status:          200,
-					Body:            tt.body,
+					Status:            200,
+					Body:              tt.body,
 					TransformResponse: tt.transform,
 				},
 			}
@@ -708,7 +708,7 @@ func TestHTTPWriter_WriteResponse_FaultError(t *testing.T) {
 					Headers: map[string]string{
 						"X-Custom": "should-be-ignored",
 					},
-					Body: "this body should not appear",
+					Body:  "this body should not appear",
 					Fault: &spec.FaultDefinition{Type: "error"},
 				},
 			},
@@ -1990,7 +1990,6 @@ func TestHTTPWriter_ApplyFault_RandomData(t *testing.T) {
 		})
 	}
 }
-
 
 // --- A8: Slow Close (fault type: slow_close) ---
 

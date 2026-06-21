@@ -38,7 +38,7 @@ func TestBinary_RequestLog_Filters(t *testing.T) {
 	defer resp.Body.Close()
 	var result struct {
 		Requests []map[string]interface{} `json:"requests"`
-		Meta     map[string]int          `json:"meta"`
+		Meta     map[string]int           `json:"meta"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode: %v", err)
