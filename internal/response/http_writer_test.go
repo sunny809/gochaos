@@ -2385,6 +2385,9 @@ func TestHTTPWriter_WriteResponse_DelayDribble_ClientDisconnect(t *testing.T) {
 		// Client timeout is expected -- the request was cancelled.
 		return
 	}
+	if resp == nil {
+		return
+	}
 	defer resp.Body.Close()
 
 	// If we got here, we received a partial response.
