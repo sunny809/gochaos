@@ -113,8 +113,10 @@ func ExampleWithRedirect() {
 		},
 	}
 	resp, err := client.Get(server.URL() + "/old-path")
-	if err != nil {
-		fmt.Println("request failed:", err)
+	if err != nil || resp == nil {
+		if err != nil {
+			fmt.Println("request failed:", err)
+		}
 		return
 	}
 	defer resp.Body.Close()
@@ -148,11 +150,17 @@ func ExampleWithCORSEnabled() {
 	})
 
 	// Send a request with Origin header to see CORS headers
-	req, _ := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
-	req.Header.Set("Origin", "http://example.com")
-	resp, err := http.DefaultClient.Do(req)
+	req, err := http.NewRequest(http.MethodGet, server.URL()+"/api/data", nil)
 	if err != nil {
 		fmt.Println("request failed:", err)
+		return
+	}
+	req.Header.Set("Origin", "http://example.com")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp == nil {
+		if err != nil {
+			fmt.Println("request failed:", err)
+		}
 		return
 	}
 	defer resp.Body.Close()

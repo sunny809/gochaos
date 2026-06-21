@@ -80,6 +80,9 @@ func TestWriteNoMatch_IncludesNearMiss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
+	if resp == nil {
+		t.Fatal("nil response")
+	}
 	defer resp.Body.Close()
 
 	body := readNoMatchBody(t, resp)
@@ -119,6 +122,9 @@ func TestWriteNoMatch_EmptyRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
+	if resp == nil {
+		t.Fatal("nil response")
+	}
 	defer resp.Body.Close()
 
 	body := readNoMatchBody(t, resp)
@@ -139,6 +145,9 @@ func TestWriteNoMatch_EmptyRegistry(t *testing.T) {
 	resp2, err := http.Get(srv.URL() + "/no/such/path")
 	if err != nil {
 		t.Fatalf("GET (2): %v", err)
+	}
+	if resp2 == nil {
+		t.Fatal("nil response")
 	}
 	defer resp2.Body.Close()
 	raw, err := io.ReadAll(resp2.Body)

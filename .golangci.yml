@@ -17,67 +17,44 @@ linters:
     - gocritic
     - misspell
     - revive
-    # Phase 1 — Quick Wins
     - forcetypeassert
     - thelper
     - usestdlibvars
     - gocyclo
     - musttag
-    # Phase 2 — Deep Static Analysis
     - exhaustive
     - wrapcheck
     - durationcheck
     - nilnil
     - decorder
-    # Phase 3 — Developer Experience
     - testpackage
     - tparallel
     - gocognit
-    # Phase 4 — Gating
     - gochecknoinits
-    # Shadow detection via vet (re-enabled from prior disable)
-    # note: shadow is disabled in govet below; use 'go vet -vettool=shadow' for strict checking
+  settings:
+    govet:
+      disable:
+        - shadow
+    gocyclo:
+      min-complexity: 15
+    gocognit:
+      min-complexity: 20
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithMessagef(
+        - fmt.Errorf(
+    decorder:
+      disable-dec-order-check: false
+      disable-init-func-first-check: false
+      disable-dec-num-check: false
 
 formatters:
   enable:
     - gofmt
     - goimports
-
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - shadow
-  gocyclo:
-    min-complexity: 15
-  gocognit:
-    min-complexity: 20
-  wrapcheck:
-    ignoreSigs:
-      - .Errorf(
-      - errors.New(
-      - errors.Unwrap(
-      - .Wrap(
-      - .Wrapf(
-      - .WithMessage(
-      - .WithMessagef(
-      - fmt.Errorf(
-  decorder:
-    disable-dec-order-check: false
-    disable-init-func-first-check: false
-    disable-dec-num-check: false
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - wrapcheck
-        - gochecknoinits
-    - path: _test\.go
-      text: "testpackage"
-      linters:
-        - testpackage
-    - path: internal/.*
-      linters:
-        - testpackage
