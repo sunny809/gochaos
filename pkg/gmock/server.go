@@ -99,6 +99,7 @@ type mockServer struct {
 	responseWriter response.Writer
 	globalRand     randx.RNG
 	startTime      time.Time
+	metrics        *Metrics
 }
 
 // NewServer creates a new gmock server with the given options.
@@ -118,6 +119,7 @@ func NewServer(opts ...Option) Server {
 	requestLog := internallog.New(cfg.MaxRequests)
 	faultLog := faultlog.NewFaultInjectionLog(cfg.MaxRequests)
 	globalRand := randx.NewGlobal(cfg.RandSeed)
+	metrics := newMetrics()
 
 	return &mockServer{
 		config:         cfg,
@@ -127,7 +129,8 @@ func NewServer(opts ...Option) Server {
 		nearMissEngine: nearmiss.NewEngine(),
 		requestLog:     requestLog,
 		faultLog:       faultLog,
-		adminHandler:   admin.New(registry, requestLog, faultLog, nearmiss.NewEngine()),
+		metrics:        newMetrics(),
+		adminHandler:   admin.New(registry, requestLog, faultLog, nearmiss.NewEngine(), metrics),
 		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip, globalRand),
 		globalRand:     globalRand,
 	}
@@ -209,32 +212,60 @@ func (s *mockServer) loadStubFiles() error {
 
 // buildMainHandler returns the HTTP handler for the main server port.
 // If includeAdmin is true, admin routes are served on the same port.
+// If a PrometheusEndpoint is configured, that path is also registered.
 func (s *mockServer) buildMainHandler(includeAdmin bool) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Dispatch admin requests when admin is on the same port
+	mux := http.NewServeMux()
+
+	if includeAdmin {
+		mux.Handle("/__admin/", s.adminHandler)
+	}
+
+	if s.config.PrometheusEndpoint != "" {
+		path := s.config.PrometheusEndpoint
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+			s.metrics.WritePrometheus(w)
+		})
+	}
+
+	// Catch-all: serve mock responses
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if includeAdmin && admin.IsAdminPath(r.URL.Path) {
 			s.adminHandler.ServeHTTP(w, r)
 			return
 		}
 		s.serveMock(w, r)
 	})
+
+	return mux
 }
 
-// Stop gracefully shuts down the server.
+// Stop gracefully shuts down the server with the configured shutdown timeout.
 func (s *mockServer) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Mark the server as shutting down so readiness probes return 503.
+	s.adminHandler.SetShuttingDown(true)
+
 	var errs []error
 
 	if s.httpServer != nil {
-		if err := s.httpServer.Shutdown(context.Background()); err != nil {
+		ctx, cancel := s.shutdownContext()
+		defer cancel()
+		if err := s.httpServer.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("server shutdown: %w", err))
 		}
 		s.httpServer = nil
 	}
 	if s.adminServer != nil {
-		if err := s.adminServer.Shutdown(context.Background()); err != nil {
+		ctx, cancel := s.shutdownContext()
+		defer cancel()
+		if err := s.adminServer.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("admin shutdown: %w", err))
 		}
 		s.adminServer = nil
@@ -253,6 +284,15 @@ func (s *mockServer) Stop() error {
 		return fmt.Errorf("gmock: shutdown errors: %v", errs)
 	}
 	return nil
+}
+
+// shutdownContext returns a context for graceful shutdown with the configured timeout.
+// If ShutdownTimeout is <= 0, returns context.Background() (wait forever).
+func (s *mockServer) shutdownContext() (context.Context, context.CancelFunc) {
+	if s.config.ShutdownTimeout <= 0 {
+		return context.Background(), func() {}
+	}
+	return context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
 }
 
 // URL returns the base URL of the running server.
@@ -283,6 +323,9 @@ func (s *mockServer) AdminURL() string {
 // Stub registers a stub definition and returns the generated ID.
 func (s *mockServer) Stub(def StubDefinition) string {
 	id, err := s.registry.Add(def)
+	if err == nil {
+		s.metrics.stubsRegistered.Add(1)
+	}
 	if err != nil {
 		s.logger.Error("failed to add stub", "error", err)
 		return ""
@@ -296,28 +339,39 @@ func (s *mockServer) StubJSON(data []byte) (string, error) {
 	if err := json.Unmarshal(data, &def); err != nil {
 		return "", fmt.Errorf("gmock: invalid stub JSON: %w", err)
 	}
-	return s.registry.Add(def)
+	id, err := s.registry.Add(def)
+	if err == nil {
+		s.metrics.stubsRegistered.Add(1)
+	}
+	return id, err
 }
 
 // DeleteStub removes a stub by ID.
 func (s *mockServer) DeleteStub(id string) bool {
-	return s.registry.Delete(id)
+	deleted := s.registry.Delete(id)
+	if deleted {
+		s.metrics.stubsRegistered.Add(-1)
+	}
+	return deleted
 }
 
 // ClearStubs removes all registered stubs.
 func (s *mockServer) ClearStubs() {
+	s.metrics.stubsRegistered.Set(0)
 	s.registry.DeleteAll()
 }
 
-// Reset clears all stubs, request log, and fault log.
+// Reset clears all stubs, request log, fault log, and resets all metrics.
 func (s *mockServer) Reset() {
+	s.metrics.resetAll()
 	s.registry.DeleteAll()
 	s.requestLog.Clear()
 	s.faultLog.Clear()
 }
 
 // RecordedStubs returns stubs recorded from proxy mode.
-// (Stub implementation — full proxy recording in Slice 8)
+// Currently unimplemented — always returns nil. Proxy recording is deferred
+// (see ROADMAP.md §4 Anti-roadmap).
 func (s *mockServer) RecordedStubs() []StubDefinition {
 	return nil
 }
@@ -338,6 +392,7 @@ func (s *mockServer) RecordedStubs() []StubDefinition {
 // NearMiss logs a warning and returns an empty (non-nil) slice rather than
 // panicking — preserving the "never panic" contract for diagnostic helpers.
 func (s *mockServer) NearMiss(method, path string, headers map[string]string, body string) []NearMissResult {
+	s.metrics.nearMissQueries.Add(1)
 	if method == "" {
 		method = http.MethodGet
 	}
@@ -368,6 +423,9 @@ func (s *mockServer) NearMiss(method, path string, headers map[string]string, bo
 //  4. On match: write the response
 //  5. On miss: return 404 with near-miss diagnostic data
 func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
+	// Increment total request counter
+	s.metrics.requestsTotal.Add(1)
+
 	// Handle CORS preflight requests
 	if s.config.CORSOptions != nil && r.Method == http.MethodOptions && r.Header.Get("Origin") != "" {
 		s.writeCORSHeaders(w, r)
@@ -388,10 +446,12 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 	s.requestLog.Record(r, matched, stubID)
 
 	if !matched {
+		s.metrics.requestsUnmatched.Add(1)
 		s.writeNoMatch(w, r)
 		return
 	}
 
+		s.metrics.requestsMatched.Add(1)
 	// Increment the stub's hit count before writing the response.
 	// The returned value is the new count after increment; this is passed
 	// to WriteResponse so that the everyNthRequest activation mode (A2)
@@ -425,8 +485,12 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("failed to write response", "stub", result.Stub.ID, "error", err)
 	}
 
-	// Record fault injection if a fault was applied (except rate_limit which is handled above)
+	// Increment metrics counters for delays and faults
+	if result.Stub.Response.Delay != nil {
+		s.metrics.faultsDelayed.Add(1)
+	}
 	if faultInfo.Injected {
+		s.metrics.faultsInjected.Add(1)
 		s.faultLog.Record(spec.FaultInjectionEntry{
 			StubID:         result.Stub.ID,
 			FaultType:      faultInfo.FaultType,

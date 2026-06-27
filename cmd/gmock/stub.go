@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
 
 	"github.com/spf13/cobra"
 
@@ -48,13 +48,16 @@ func newStubListCmd() *cobra.Command {
 			}
 			defer resp.Body.Close()
 
-			body, _ := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("read response body: %w", err)
+			}
 			// Pretty-print JSON
 			var pretty bytes.Buffer
 			if err := json.Indent(&pretty, body, "", "  "); err == nil {
-				fmt.Println(pretty.String())
+				fmt.Fprintln(cmd.OutOrStdout(), pretty.String())
 			} else {
-				fmt.Println(string(body))
+				fmt.Fprintln(cmd.OutOrStdout(), string(body))
 			}
 			return nil
 		},
@@ -76,7 +79,10 @@ func newStubCreateCmd() *cobra.Command {
 			}
 
 			for i, def := range stubs {
-				data, _ := json.Marshal(def)
+				data, err := json.Marshal(def)
+				if err != nil {
+					return fmt.Errorf("stub %d: marshal: %w", i, err)
+				}
 				resp, err := commonClient.Post(
 					commonAdminURL+"/__admin/mappings",
 					"application/json",
@@ -84,16 +90,21 @@ func newStubCreateCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("stub %d: post: %w", i, err)
 				}
-				body, _ := io.ReadAll(resp.Body)
+				body, err := io.ReadAll(resp.Body)
 				resp.Body.Close()
+				if err != nil {
+					return fmt.Errorf("stub %d: read body: %w", i, err)
+				}
 
 				if resp.StatusCode >= 400 {
 					return fmt.Errorf("stub %d: server returned %d: %s", i, resp.StatusCode, string(body))
 				}
 
 				var created map[string]interface{}
-				_ = json.Unmarshal(body, &created)
-				fmt.Printf("created stub: %v\n", created["id"])
+				if err := json.Unmarshal(body, &created); err != nil {
+					return fmt.Errorf("stub %d: unmarshal response: %w", i, err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "created stub: %v\n", created["id"])
 			}
 			return nil
 		},
@@ -106,21 +117,24 @@ func newStubGetCmd() *cobra.Command {
 		Short: "Get a stub by ID",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := commonClient.Get(commonAdminURL + "/__admin/mappings/" + args[0])
+			resp, err := commonClient.Get(commonAdminURL + "/__admin/mappings/" + url.PathEscape(args[0]))
 			if err != nil {
-				return err
+				return fmt.Errorf("connect to server: %w", err)
 			}
 			defer resp.Body.Close()
 
-			body, _ := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("read response body: %w", err)
+			}
 			var pretty bytes.Buffer
 			if err := json.Indent(&pretty, body, "", "  "); err == nil {
-				fmt.Println(pretty.String())
+				fmt.Fprintln(cmd.OutOrStdout(), pretty.String())
 			} else {
-				fmt.Println(string(body))
+				fmt.Fprintln(cmd.OutOrStdout(), string(body))
 			}
 			if resp.StatusCode >= 400 {
-				os.Exit(1)
+				return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
 			}
 			return nil
 		},
@@ -133,18 +147,21 @@ func newStubDeleteCmd() *cobra.Command {
 		Short: "Delete a stub by ID (or --all to delete all)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deleteAll, _ := cmd.Flags().GetBool("all")
-			url := commonAdminURL + "/__admin/mappings"
+			u := commonAdminURL + "/__admin/mappings"
 			if !deleteAll {
 				if len(args) != 1 {
 					return fmt.Errorf("provide a stub ID or use --all")
 				}
-				url += "/" + args[0]
+				u += "/" + url.PathEscape(args[0])
 			}
 
-			req, _ := http.NewRequest(http.MethodDelete, url, nil)
+			req, err := http.NewRequest(http.MethodDelete, u, nil)
+			if err != nil {
+				return fmt.Errorf("build request: %w", err)
+			}
 			resp, err := commonClient.Do(req)
 			if err != nil {
-				return err
+				return fmt.Errorf("connect to server: %w", err)
 			}
 			defer resp.Body.Close()
 
@@ -152,7 +169,7 @@ func newStubDeleteCmd() *cobra.Command {
 				body, _ := io.ReadAll(resp.Body)
 				return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
 			}
-			fmt.Println("deleted")
+			fmt.Fprintln(cmd.OutOrStdout(), "deleted")
 			return nil
 		},
 	}

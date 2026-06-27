@@ -90,7 +90,11 @@ func (r *Rand) Intn(n int) int {
 
 // NormFloat64 returns a normally distributed float64 from the standard
 // normal distribution (mean 0, stddev 1).
+// Returns 0 if the receiver is nil (stub seed not configured).
 func (r *Rand) NormFloat64() float64 {
+	if r == nil {
+		return 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.rand.NormFloat64()
@@ -99,7 +103,11 @@ func (r *Rand) NormFloat64() float64 {
 // Read generates len(p) random bytes and writes them into p.
 // It always returns len(p) and a nil error.
 // This is thread-safe via sync.Mutex, matching the other Rand methods.
+// Returns (0, nil) if the receiver is nil (stub seed not configured).
 func (r *Rand) Read(p []byte) (int, error) {
+	if r == nil {
+		return 0, nil
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.rand.Read(p)

@@ -342,7 +342,7 @@ func TestHTTPWriter_WriteCORSHeaders(t *testing.T) {
 				AllowCredentials: true,
 				MaxAge:           3600,
 			},
-			wantOrigin:      "*",
+			wantOrigin:      "http://example.com", // echoes origin when AllowCredentials=true with wildcard
 			wantMethods:     "GET, POST, DELETE",
 			wantHeaders:     "Content-Type, Authorization",
 			wantCredentials: "true",

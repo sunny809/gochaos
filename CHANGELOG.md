@@ -5,12 +5,66 @@ All notable changes to gmock are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] — 2026-06-23
 
 ### Added
 
-- **Phase 1.5: Chaos Observability (O1-O3)** — CI-gateable assertions on what faults
-  actually fired. Essential for probabilistic/Nth-request/time-window activation modes.
+- **D2-D3: K8s liveness + readiness probes** — `GET /__admin/health/live` returns 200
+  (simple "alive" check). `GET /__admin/health/ready` returns 200 + stubCount, or 503
+  during shutdown. Both endpoints registered under `/__admin/` prefix.
+
+- **D4: Graceful shutdown timeout** — `WithShutdownTimeout(duration)` server option
+  controls the maximum wait for in-flight requests during shutdown. Default: 30 seconds.
+  When timeout expires, remaining connections are force-closed.
+
+- **M1-M2: Server metrics** — 8 expvar counters tracking requests (total/matched/unmatched),
+  faults injected, delays applied, near-miss queries, stub count, and admin operations.
+  Exposed via `GET /__admin/metrics` as JSON.
+
+- **M3: Main-path benchmark** — `BenchmarkFullPipeline` measures end-to-end throughput
+  with 100 stubs and 100 concurrent goroutines. Target: ≥10K req/sec on 8-core.
+
+- **D5: README repositioning** — Tagline updated to "Fault-Burst Generator for
+  Resilience Testing". Chaos-first quick start. Comparison table moved below features
+  section.
+
+- **Technical Writer: Documentation audit** — Created `near-miss-diagnostics.md` and
+  `go-library-api.md`. Updated `fault-injection.md` and `response-delays.md` to cover
+  all Phase 1 types. Updated `admin-api.md` with health endpoints, metrics, and nearmiss.
+
+- **Sprint process documentation** — `docs/sprints/` with all 5 sprints documented.
+  `docs/templates/` with 8 role templates (PO, Tech Lead, Developer, QA, Technical Writer)
+  defining fixed input/output artifacts per sprint phase.
+
+## [Unreleased]
+
+### Added (Sprint 06)
+
+- **Prometheus metrics endpoint (A1-A3)** — Zero-dependency Prometheus text format
+  export of all 8 gmock metrics. Always available at `GET /__admin/metrics/prometheus`.
+  Optional user-facing path via `WithPrometheusEndpoint("/metrics")`. No external
+  Prometheus client library required (~100 lines, `fmt.Fprintf` to `io.Writer`).
+
+  - `WritePrometheus(w io.Writer)` method on `Metrics` with registration table
+  - `WithPrometheusEndpoint(path)` server option
+  - `GET /__admin/metrics/prometheus` admin route
+
+- **chaos scenario library repository (gochaos/scenarios)** — New repository with
+  8 pre-built chaos scenarios covering database outages, network degradation,
+  API rate limiting, and multi-fault burst patterns. CLI tool `gm scenario` supports
+  `list`, `info`, and `export` commands.
+
+- **Prometheus+Grafana observability stack (gochaos/prometheus)** — New repository
+  with Grafana overview dashboard (7 panels), Docker Compose example
+  (gmock + Prometheus + Grafana), and dashboards auto-provisioning configuration.
+
+### Documentation
+
+- New feature doc `docs/features/metrics.md` — Prometheus metrics reference
+- Updated `docs/admin-api.md` — `GET /__admin/metrics/prometheus` endpoint
+- Updated `docs/go-library-api.md` — `WithPrometheusEndpoint` option
+
+## [1.0.0] — 2026-06-23
 
   - **O1: FaultInjectionLog** — Ring buffer (default 1000 entries) records every fault
     injection event with stub ID, fault type, activation mode, request method/path, and

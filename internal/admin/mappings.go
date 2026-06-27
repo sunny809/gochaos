@@ -9,9 +9,14 @@ import (
 	"github.com/sunny809/gochaos/internal/stub"
 )
 
+// maxRequestBody is the maximum allowed size for admin API request bodies.
+// Requests exceeding this limit receive a 413 Payload Too Large response.
+const maxRequestBody = 1 << 20 // 1 MB
+
 // createMapping handles POST /__admin/mappings.
 // Accepts a single StubDefinition in JSON and registers it.
 func (h *Handler) createMapping(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 	var def spec.StubDefinition
 	if err := json.NewDecoder(r.Body).Decode(&def); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())

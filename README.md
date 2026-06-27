@@ -1,6 +1,11 @@
-# gochaos
+# gochaos — Fault-Burst Generator for Resilience Testing
 
-> A lightweight HTTP mock server — runs anywhere, zero dependencies, WireMock-compatible API. Embeddable in Go tests, or run as a standalone CLI for **CI/CD integration testing, cross-language API mocking, and chaos engineering**.
+> **Reproduce hours of production failures in seconds.** gochaos is a fault-burst
+> generator: a real HTTP mock server that rapidly reproduces high-failure,
+> high-latency, and high-unreliability conditions so you can CI-gate your
+> service's resilience strategy (retries, circuit breakers, timeouts, fallbacks).
+>
+> Embeddable in Go tests or run as a standalone CLI/Docker image — zero JVM, ~15MB image.
 
 **Project naming**: `gochaos` is the Go module and repository name. `gmock` is the CLI binary name. The public Go package is imported as `github.com/sunny809/gochaos/pkg/gmock`.
 
@@ -13,21 +18,10 @@
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go)](https://golang.org/doc/devel/release.html)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/sunny809/gochaos/pkgs/container/gochaos)
 
-`gochaos` is a lightweight HTTP/REST mock server inspired by [WireMock](https://wiremock.org/), built natively in Go. Unlike `gock` and `httpmock` which only intercept at the `http.RoundTripper` level, gochaos runs as a **real HTTP server** with a **REST admin API**, **response templating**, **request verification**, **near-miss diagnostics**, and **fault injection** — both as an embeddable Go library and a standalone CLI for **any language team**.
-
-## Comparison
-
-| Feature | gochaos | gock / httpmock | WireMock |
-|---------|---------|-----------------|----------|
-| **Real HTTP server** | ✅ Yes | ❌ RoundTripper | ✅ Yes (JVM) |
-| **Standalone CLI / Docker** | ✅ Yes | ❌ Library only | ✅ Yes (JVM) |
-| **Embeddable in Go tests** | ✅ Yes | ✅ Yes | ❌ JVM only |
-| **REST admin API** | ✅ Yes | ❌ No | ✅ Yes |
-| **Near-miss diagnostics** | ✅ Yes | ❌ No | ✅ Yes |
-| **Fault injection** | ✅ Yes | ❌ No | ❌ Limited |
-| **Callback/Webhook** | 🔜 Planned | ❌ No | ✅ Yes |
-| **Startup time** | ~5ms | ~1ms | ~2-5s |
-| **Memory** | ~10MB | ~5MB | ~200-500MB |
+Unlike `gock` and `httpmock` which only intercept at `http.RoundTripper`, gochaos runs
+as a **real HTTP server** with **fault injection**, **chaos activation modes**,
+**seedable RNG**, **near-miss diagnostics**, and a **REST admin API** — as an
+embeddable Go library and a standalone CLI/Docker image.
 
 ## Installation
 
@@ -49,31 +43,71 @@ go get github.com/sunny809/gochaos/pkg/gmock
 
 Requires Go 1.22 or newer (uses the enhanced `net/http.ServeMux` pattern matching).
 
-## Quick Start
+## Quick Start — Chaos First
 
-### As a CLI
+### Inject a Probabilistic Fault in 30 Seconds
+
+```go
+package my_test
+
+import (
+    "net/http"
+    "testing"
+    "github.com/sunny809/gochaos/pkg/gmock"
+)
+
+func TestRetryOnIntermittentFailures(t *testing.T) {
+    // 1. Start a mock server
+    server := gmock.NewServer(gmock.WithPort(0))
+    if err := server.Start(); err != nil {
+        t.Fatal(err)
+    }
+    defer server.Stop()
+
+    // 2. Register a stub with 30% probability connection reset
+    server.Stub(gmock.StubDefinition{
+        Request:  gmock.RequestPattern{Method: "GET", URLPath: "/api/downstream"},
+        Response: gmock.ResponseDefinition{Status: 200, Body: `{"ok":true}`},
+        Fault: &gmock.FaultDefinition{
+            Type: "connection_reset",
+            Activation: &gmock.Activation{Probability: 0.3},
+        },
+    })
+
+    // 3. Run requests through your SUT
+    for range 20 {
+        http.Get(server.URL() + "/api/downstream")
+    }
+
+    // 4. CI-gate: assert at least 3 faults actually fired
+    result := server.VerifyFaultsInjected(gmock.FaultPattern{
+        FaultType: "connection_reset",
+    }, 3)
+    if !result.Matched {
+        t.Errorf("expected ≥3 faults, got %d", result.ActualCount)
+    }
+}
+```
+
+### Or as a CLI
 
 ```bash
-# Install
-go install github.com/sunny809/gochaos/cmd/gmock@latest
+# Start server (Docker, ~15MB scratch image)
+docker run --rm -p 8080:8080 ghcr.io/sunny809/gochaos:latest
 
-# Start with stubs from a YAML file
-gmock start --port 8080 --stubs ./testdata/stubs.yaml
+# Register a stub with 50% probability error fault
+curl -X POST http://localhost:8080/__admin/mappings \
+  -H 'Content-Type: application/json' \
+  -d '{"request":{"method":"GET","urlPath":"/api/unstable"},"response":{"status":200,"body":"\"ok\""},"fault":{"type":"error","activation":{"probability":0.5}}}'
 
-# In another terminal, use it
-curl http://localhost:8080/api/users
-#=> {"users":[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]}
+# Test the fault fires ~50% of the time
+for i in {1..10}; do curl -w "\n" http://localhost:8080/api/unstable; done
 
-# Inspect via the admin API
-curl http://localhost:8080/__admin/health
-curl http://localhost:8080/__admin/mappings
-curl http://localhost:8080/__admin/requests
-
-# Or use the CLI client
-gmock stub list --admin-url http://localhost:8080
-gmock stub create ./new-stub.json --admin-url http://localhost:8080
-gmock reset --admin-url http://localhost:8080
+# Verify via fault log
+curl http://localhost:8080/__admin/fault-log | jq .count
 ```
+
+## Quick Start — Basic Mock
 
 ### As a Go Library
 
@@ -121,6 +155,30 @@ func main() {
         fmt.Printf("expected 1 request, got %d\n", result.ActualCount)
     }
 }
+```
+
+### As a CLI
+
+```bash
+# Install
+go install github.com/sunny809/gochaos/cmd/gmock@latest
+
+# Start with stubs from a YAML file
+gmock start --port 8080 --stubs ./testdata/stubs.yaml
+
+# In another terminal, use it
+curl http://localhost:8080/api/users
+#=> {"users":[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]}
+
+# Inspect via the admin API
+curl http://localhost:8080/__admin/health
+curl http://localhost:8080/__admin/mappings
+curl http://localhost:8080/__admin/requests
+
+# Or use the CLI client
+gmock stub list --admin-url http://localhost:8080
+gmock stub create ./new-stub.json --admin-url http://localhost:8080
+gmock reset --admin-url http://localhost:8080
 ```
 
 ## Stub File Format
@@ -269,12 +327,17 @@ server := gmock.NewServer(gmock.WithGzip(false))
 | `GET` | `/__admin/fault-log` | View fault injection log |
 | `DELETE` | `/__admin/fault-log` | Clear fault injection log |
 | `GET` | `/__admin/health` | Health check |
+| `GET` | `/__admin/health/live` | K8s liveness probe |
+| `GET` | `/__admin/health/ready` | K8s readiness probe |
+| `GET` | `/__admin/metrics` | Server metrics (8 counters) |
+| `POST` | `/__admin/nearmiss` | Near-miss diagnostics |
 
 ## Documentation
 
 | For | Document |
 |-----|----------|
 | 🚀 **Getting Started** | [Feature Overview](docs/features/getting-started.md) |
+| 📚 **Go Library API** | [docs/go-library-api.md](docs/go-library-api.md) — complete API reference |
 | 📖 **CLI Reference** | [docs/cli.md](docs/cli.md) — all commands and flags |
 | 🌐 **Admin API** | [docs/admin-api.md](docs/admin-api.md) — REST API with curl examples |
 | 🎯 **Stub Matching** | [Feature Guide](docs/features/stub-matching.md) — 8 matching dimensions |
@@ -356,6 +419,28 @@ services:
 - Request verification API (Verify, VerifyNotCalled)
 - Near-miss diagnostics (unmatched request -> closest stub + per-dimension why)
 - YAML/JSON stub file loading
+
+## Comparison
+
+| Feature | gochaos | gock / httpmock | WireMock |
+|---------|---------|-----------------|----------|
+| **Fault types** | 7 | 0 | 4 |
+| **Delay distributions** | 5 | 0 | 3 |
+| **Probabilistic faults** | ✅ | ❌ | ❌ |
+| **Nth-request faults** | ✅ | ❌ | ❌ |
+| **Time-window faults** | ✅ | ❌ | ❌ |
+| **Seedable RNG** | ✅ | ❌ | ❌ |
+| **CI-gateable fault assertions** | ✅ | ❌ | ❌ |
+| **Near-miss diagnostics** | ✅ | ❌ | ✅ |
+| **Real HTTP server** | ✅ | ❌ | ✅ |
+| **Standalone CLI / Docker** | ✅ (~15MB) | ❌ | ✅ (~200MB) |
+| **Embeddable in Go tests** | ✅ | ✅ | ❌ |
+| **Startup time** | ~5ms | ~1ms | ~2-5s |
+| **Memory** | ~10MB | ~5MB | ~200-500MB |
+
+gochaos differentiator: **chaos depth** — probabilistic/Nth-request/time-window
+activation modes, seedable RNG, and CI-gateable fault assertions. WireMock can't
+do any of this. gock/httpmock have no chaos features at all.
 
 ## Building & Testing
 

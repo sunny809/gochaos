@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,16 +15,221 @@ import (
 	"github.com/sunny809/gochaos/internal/stub"
 )
 
+// testMetrics is a simple MetricsProvider for tests.
+type testMetrics struct{}
+
+func (m *testMetrics) Snapshot() map[string]int64 {
+	return map[string]int64{
+		"requests_total":     10,
+		"requests_matched":   8,
+		"requests_unmatched": 2,
+		"faults_injected":    3,
+		"faults_delayed":     1,
+		"nearmiss_queries":   0,
+		"stubs_registered":   5,
+		"admin_operations":   2,
+	}
+}
+
+func (m *testMetrics) Add(name string, delta int64) {}
+func (m *testMetrics) WritePrometheus(w io.Writer) {
+	w.Write([]byte("# HELP test\n# TYPE test gauge\ntest 0\n"))
+}
+
 func setupTest() (*Handler, *stub.Registry, *log.RequestLog) {
 	registry := stub.NewRegistry()
 	requestLog := log.New(100)
 	faultLog := faultlog.NewFaultInjectionLog(100)
 	engine := nearmiss.NewEngine()
-	h := New(registry, requestLog, faultLog, engine)
+	h := New(registry, requestLog, faultLog, engine, &testMetrics{})
 	return h, registry, requestLog
 }
 
-func TestHealth(t *testing.T) {
+func TestHealthLive(t *testing.T) {
+	h, _, _ := setupTest()
+
+	req := httptest.NewRequest("GET", "/__admin/health/live", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if body["status"] != "alive" {
+		t.Errorf("expected status=alive, got %v", body["status"])
+	}
+}
+
+func TestHealthReady(t *testing.T) {
+	h, registry, _ := setupTest()
+	registry.Add(spec.StubDefinition{
+		Request:  spec.RequestPattern{Method: "GET", URLPath: "/test"},
+		Response: spec.ResponseDefinition{Status: 200},
+	})
+
+	req := httptest.NewRequest("GET", "/__admin/health/ready", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if body["status"] != "ready" {
+		t.Errorf("expected status=ready, got %v", body["status"])
+	}
+	if body["stubCount"] != 1.0 {
+		t.Errorf("expected stubCount=1, got %v", body["stubCount"])
+	}
+}
+
+func TestHealthReadyShuttingDown(t *testing.T) {
+	h, _, _ := setupTest()
+
+	h.SetShuttingDown(true)
+
+	req := httptest.NewRequest("GET", "/__admin/health/ready", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if body["status"] != "not ready — shutting down" {
+		t.Errorf("expected status=not ready — shutting down, got %v", body["status"])
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	h, _, _ := setupTest()
+
+	req := httptest.NewRequest("GET", "/__admin/metrics", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	expectedKeys := []string{
+		"requests_total", "requests_matched", "requests_unmatched",
+		"faults_injected", "faults_delayed", "nearmiss_queries",
+		"stubs_registered", "admin_operations",
+	}
+	for _, key := range expectedKeys {
+		if _, ok := body[key]; !ok {
+			t.Errorf("metrics response missing key: %s", key)
+		}
+	}
+}
+
+func TestListFaultLog(t *testing.T) {
+	h, _, _ := setupTest()
+	// Record a fault injection event
+	h.faultLog.Record(spec.FaultInjectionEntry{
+		StubID: "stub-1",
+		FaultType: "connection_reset",
+		RequestPath: "/api/test",
+	})
+
+	req := httptest.NewRequest("GET", "/__admin/fault-log", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var result struct {
+		Entries []spec.FaultInjectionEntry `json:"entries"`
+		Count   int                            `json:"count"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(result.Entries))
+	}
+	if result.Count != 1 {
+		t.Errorf("expected total=1, got %d", result.Count)
+	}
+	if result.Entries[0].StubID != "stub-1" {
+		t.Errorf("expected stubID=stub-1, got %s", result.Entries[0].StubID)
+	}
+}
+
+func TestClearFaultLog(t *testing.T) {
+	h, _, _ := setupTest()
+	h.faultLog.Record(spec.FaultInjectionEntry{
+		StubID: "stub-1",
+		FaultType: "connection_reset",
+		RequestPath: "/api/test",
+	})
+
+	req := httptest.NewRequest("DELETE", "/__admin/fault-log", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if result["cleared"] != true {
+		t.Errorf("expected cleared=true, got %v", result["cleared"])
+	}
+	if result["count"] != float64(1) {
+		t.Errorf("expected cleared=1, got %d", result["cleared"])
+	}
+
+	if h.faultLog.Len() != 0 {
+		t.Errorf("expected 0 entries after clear, got %d", h.faultLog.Len())
+	}
+}
+
+func TestListRequestsFilterMatched(t *testing.T) {
+	h, _, requestLog := setupTest()
+	requestLog.Record(httptest.NewRequest("GET", "/matched", nil), true, "s1")
+	requestLog.Record(httptest.NewRequest("GET", "/unmatched", nil), false, "")
+
+	req := httptest.NewRequest("GET", "/__admin/requests?filter=matched", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	var result struct {
+		Requests []interface{}  `json:"requests"`
+		Meta     map[string]int `json:"meta"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(result.Requests) != 1 {
+		t.Errorf("expected 1 matched, got %d", len(result.Requests))
+	}
+}
+func TestHealthLegacy(t *testing.T) {
 	h, registry, _ := setupTest()
 	registry.Add(spec.StubDefinition{
 		Request:  spec.RequestPattern{Method: "GET", URLPath: "/test"},
@@ -47,7 +253,6 @@ func TestHealth(t *testing.T) {
 		t.Errorf("expected stubCount=1, got %v", body["stubCount"])
 	}
 }
-
 func TestCreateMapping(t *testing.T) {
 	h, _, _ := setupTest()
 

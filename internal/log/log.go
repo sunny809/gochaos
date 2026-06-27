@@ -6,14 +6,19 @@
 package log
 
 import (
+	"bytes"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/sunny809/gochaos/internal/spec"
 )
+
+// maxBodyCapture is the maximum number of bytes read from a request body
+// for logging. Bodies larger than this are truncated. This prevents
+// unbounded memory usage when large request bodies are logged.
+const maxBodyCapture = 1 << 20 // 1 MB
 
 // Entry wraps a LoggedRequest with internal metadata.
 type Entry struct {
@@ -58,14 +63,18 @@ func (l *RequestLog) Record(req *http.Request, matched bool, stubID string) {
 		StubID:  stubID,
 	}
 
-	// Best-effort body capture
+	// Best-effort body capture (limited to maxBodyCapture bytes)
 	if req.Body != nil {
-		body, err := io.ReadAll(req.Body)
+		body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyCapture+1))
 		if err == nil {
+			truncated := len(body) > maxBodyCapture
+			if truncated {
+				body = body[:maxBodyCapture]
+			}
 			entry.Request.Body = string(body)
 			_ = req.Body.Close()
 			// Restore body for downstream handlers
-			req.Body = io.NopCloser(strings.NewReader(string(body)))
+			req.Body = io.NopCloser(bytes.NewReader(body))
 		}
 	}
 

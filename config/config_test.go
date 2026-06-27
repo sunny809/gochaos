@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -188,6 +189,181 @@ func TestLoadStubsFromFileUnknownExt(t *testing.T) {
 	if len(stubs) != 1 {
 		t.Fatalf("expected 1 stub, got %d", len(stubs))
 	}
+}
+
+func TestLoadStubsFromFileYAMLArray(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "array.yaml")
+	if err := os.WriteFile(path, []byte(`
+- request:
+    method: GET
+    urlPath: /x
+  response:
+    status: 200
+- request:
+    method: POST
+    urlPath: /y
+  response:
+    status: 201
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stubs, err := LoadStubsFromFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stubs) != 2 {
+		t.Fatalf("expected 2 stubs, got %d", len(stubs))
+	}
+	if stubs[0].Request.Method != "GET" {
+		t.Errorf("expected GET, got %s", stubs[0].Request.Method)
+	}
+	if stubs[1].Request.Method != "POST" {
+		t.Errorf("expected POST, got %s", stubs[1].Request.Method)
+	}
+}
+
+func TestLoadStubsFromFileYmlWithYAMLContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stubs.yml")
+	if err := os.WriteFile(path, []byte(`
+request:
+  method: DELETE
+  urlPath: /remove
+response:
+  status: 204
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stubs, err := LoadStubsFromFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stubs) != 1 {
+		t.Fatalf("expected 1 stub, got %d", len(stubs))
+	}
+	if stubs[0].Request.Method != "DELETE" {
+		t.Errorf("expected DELETE, got %s", stubs[0].Request.Method)
+	}
+}
+
+func TestLoadStubsFromFileUnknownExtYAMLContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stubs.txt")
+	if err := os.WriteFile(path, []byte(`
+request:
+  method: PATCH
+  urlPath: /update
+response:
+  status: 200
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stubs, err := LoadStubsFromFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stubs) != 1 {
+		t.Fatalf("expected 1 stub, got %d", len(stubs))
+	}
+	if stubs[0].Request.Method != "PATCH" {
+		t.Errorf("expected PATCH, got %s", stubs[0].Request.Method)
+	}
+}
+
+func TestLoadStubsFromFileUnknownExtBothFail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.txt")
+	if err := os.WriteFile(path, []byte(`not valid json or yaml`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadStubsFromFile(path)
+	if err == nil {
+		t.Fatal("expected error for invalid content")
+	}
+	if !contains(err.Error(), "parse JSON") || !contains(err.Error(), "parse YAML") {
+		t.Errorf("expected error to mention both JSON and YAML parsing, got: %v", err)
+	}
+}
+
+func TestLoadStubsFromFileMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte(`{bad json`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadStubsFromFile(path)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON")
+	}
+}
+
+func TestLoadStubsFromFileMalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(path, []byte(`{bad yaml`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadStubsFromFile(path)
+	if err == nil {
+		t.Fatal("expected error for malformed YAML")
+	}
+}
+
+func TestLoadStubsFromFileEmptyJSONArray(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.json")
+	if err := os.WriteFile(path, []byte(`[]`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stubs, err := LoadStubsFromFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stubs) != 0 {
+		t.Fatalf("expected 0 stubs, got %d", len(stubs))
+	}
+}
+
+func TestLoadStubsFromFileEmptyYAMLArray(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.yaml")
+	if err := os.WriteFile(path, []byte(`[]`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stubs, err := LoadStubsFromFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stubs) != 0 {
+		t.Fatalf("expected 0 stubs, got %d", len(stubs))
+	}
+}
+
+func TestLoadStubsFromFilesErrorPath(t *testing.T) {
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "a.json")
+	p2 := filepath.Join(dir, "nonexistent.json")
+	if err := os.WriteFile(p1, []byte(`{"request":{"method":"GET","urlPath":"/a"},"response":{"status":200}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadStubsFromFiles([]string{p1, p2})
+	if err == nil {
+		t.Fatal("expected error when one file doesn't exist")
+	}
+}
+
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }
 
 func TestLoadStubsFromFileEmpty(t *testing.T) {

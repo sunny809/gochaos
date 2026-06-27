@@ -58,10 +58,141 @@ func readNoMatchBody(t *testing.T, resp *http.Response) noMatchResponse {
 	return body
 }
 
-// TestWriteNoMatch_IncludesNearMiss verifies that the 404 response body
-// embeds near-miss diagnostics for each registered stub when a request fails
-// to match. This is the headline P0.3 behavior: the on-miss response actually
-// tells the user *which* stubs were close and *why*.
+func TestStubDeleteNotFound(t *testing.T) {
+	srv := startMockServer(t)
+	deleted := srv.DeleteStub("nonexistent-id")
+	if deleted {
+		t.Error("expected DeleteStub to return false for unknown ID")
+	}
+}
+
+func TestClearStubs(t *testing.T) {
+	srv := startMockServer(t)
+	srv.Stub(gmock.StubDefinition{
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/test"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	srv.ClearStubs()
+
+	resp, err := http.Get(srv.URL() + "/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 after ClearStubs, got %d", resp.StatusCode)
+	}
+}
+
+func TestReset(t *testing.T) {
+	srv := startMockServer(t)
+	srv.Stub(gmock.StubDefinition{
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/test"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	// Make a request to populate the request log
+	resp, err := http.Get(srv.URL() + "/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	srv.Reset()
+
+	// After reset, the stub should be gone
+	resp, err = http.Get(srv.URL() + "/test")
+	if err != nil {
+		t.Fatalf("GET after reset: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 after Reset, got %d", resp.StatusCode)
+	}
+}
+
+func TestStubJSON(t *testing.T) {
+	srv := startMockServer(t)
+	jsonData := []byte(`{"request":{"method":"GET","urlPath":"/json-stub"},"response":{"status":200,"body":"from-json"}}`)
+
+	id, err := srv.StubJSON(jsonData)
+	if err != nil {
+		t.Fatalf("StubJSON: %v", err)
+	}
+	if id == "" {
+		t.Error("expected non-empty ID from StubJSON")
+	}
+
+	resp, err := http.Get(srv.URL() + "/json-stub")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "from-json" {
+		t.Errorf("expected body 'from-json', got %q", string(body))
+	}
+}
+
+func TestStubJSONInvalid(t *testing.T) {
+	srv := startMockServer(t)
+	jsonData := []byte(`not valid json`)
+
+	id, err := srv.StubJSON(jsonData)
+	if err == nil {
+		t.Error("expected error for invalid JSON, got nil")
+	}
+	if id != "" {
+		t.Errorf("expected empty ID for invalid JSON, got %q", id)
+	}
+}
+
+func TestRequestLog(t *testing.T) {
+	srv := startMockServer(t)
+	srv.Stub(gmock.StubDefinition{
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/test"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK},
+	})
+
+	resp, err := http.Get(srv.URL() + "/test")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	entries := srv.RequestLog()
+	if len(entries) != 1 {
+		t.Errorf("expected 1 log entry, got %d", len(entries))
+	}
+}
+
+func TestUnmatchedRequests(t *testing.T) {
+	srv := startMockServer(t)
+
+	resp, err := http.Get(srv.URL() + "/no-match")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	unmatched := srv.UnmatchedRequests()
+	if len(unmatched) != 1 {
+		t.Errorf("expected 1 unmatched request, got %d", len(unmatched))
+	}
+	if unmatched[0].Path != "/no-match" {
+		t.Errorf("expected path /no-match, got %q", unmatched[0].Path)
+	}
+}
 func TestWriteNoMatch_IncludesNearMiss(t *testing.T) {
 	srv := startMockServer(t)
 

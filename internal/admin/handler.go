@@ -6,24 +6,29 @@
 //
 // API endpoints:
 //
-//	POST   /__admin/mappings       Create a stub
-//	GET    /__admin/mappings       List all stubs
-//	DELETE /__admin/mappings       Delete all stubs
-//	GET    /__admin/mappings/{id}  Get a stub by ID
-//	DELETE /__admin/mappings/{id}  Delete a stub by ID
-//	POST   /__admin/nearmiss       Near-miss diagnostics
-//	POST   /__admin/reset          Reset all server state
-//	GET    /__admin/requests       List logged requests
-//	DELETE /__admin/requests       Clear request log
-//	GET    /__admin/fault-log      List fault injection events
-//	DELETE /__admin/fault-log      Clear fault injection log
-//	GET    /__admin/health         Health check
+//	POST   /__admin/mappings              Create a stub
+//	GET    /__admin/mappings              List all stubs
+//	DELETE /__admin/mappings              Delete all stubs
+//	GET    /__admin/mappings/{id}         Get a stub by ID
+//	DELETE /__admin/mappings/{id}         Delete a stub by ID
+//	POST   /__admin/nearmiss              Near-miss diagnostics
+//	POST   /__admin/reset                 Reset all server state
+//	GET    /__admin/requests              List logged requests
+//	DELETE /__admin/requests              Clear request log
+//	GET    /__admin/fault-log             List fault injection events
+//	DELETE /__admin/fault-log             Clear fault injection log
+//	GET    /__admin/health                Health check (legacy)
+//	GET    /__admin/health/live           Liveness probe (K8s)
+//	GET    /__admin/health/ready          Readiness probe (K8s)
+//	GET    /__admin/metrics               Server metrics (expvar counters)
 package admin
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/sunny809/gochaos/internal/faultlog"
 	"github.com/sunny809/gochaos/internal/log"
@@ -40,16 +45,25 @@ type Handler struct {
 	requestLog     *log.RequestLog
 	faultLog       *faultlog.FaultInjectionLog
 	nearMissEngine *nearmiss.Engine
+	metrics        MetricsProvider
 	resetFns       []func() // additional reset hooks (scenarios, proxy, etc.)
+	shuttingDown   atomic.Bool // set to true when the server is shutting down (for readiness probe)
 }
 
-// New creates an admin Handler bound to the given registry, request log, fault log, and near-miss engine.
-func New(registry *stub.Registry, requestLog *log.RequestLog, faultLog *faultlog.FaultInjectionLog, nearMissEngine *nearmiss.Engine) *Handler {
+// SetShuttingDown marks the server as shutting down, causing the readiness
+// probe to return 503. Call this before Server.Shutdown().
+func (h *Handler) SetShuttingDown(v bool) {
+	h.shuttingDown.Store(v)
+}
+
+// New creates an admin Handler bound to the given dependencies.
+func New(registry *stub.Registry, requestLog *log.RequestLog, faultLog *faultlog.FaultInjectionLog, nearMissEngine *nearmiss.Engine, metrics MetricsProvider) *Handler {
 	return &Handler{
 		registry:       registry,
 		requestLog:     requestLog,
 		faultLog:       faultLog,
 		nearMissEngine: nearMissEngine,
+		metrics:        metrics,
 	}
 }
 
@@ -68,6 +82,10 @@ func IsAdminPath(path string) bool {
 // Dispatches to the appropriate handler method based on path and method.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+	// Increment admin operations counter for all non-health admin requests.
+	if h.metrics != nil && !strings.HasPrefix(path, Prefix+"health") {
+		h.metrics.Add("admin_operations", 1)
+	}
 
 	switch {
 	case path == Prefix+"mappings" || path == Prefix+"mappings/":
@@ -127,8 +145,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 		}
 
-	case path == Prefix+"health":
+	case path == Prefix+"health" || path == Prefix+"health/":
 		h.health(w, r)
+
+	case path == Prefix+"health/live" || path == Prefix+"health/live/":
+		h.HealthLive(w, r)
+
+	case path == Prefix+"health/ready" || path == Prefix+"health/ready/":
+		h.HealthReady(w, r)
+
+	case path == Prefix+"metrics/prometheus":
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		h.prometheusHandler(w, r)
+
+	case path == Prefix+"metrics" || path == Prefix+"metrics/":
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		h.metricsHandler(w, r)
 
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{
@@ -142,7 +180,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		slog.Warn("failed to encode JSON response", "error", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

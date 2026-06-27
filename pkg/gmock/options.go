@@ -1,5 +1,7 @@
 package gmock
 
+import "time"
+
 // Option configures a Server. Use the With* functions to create options.
 type Option func(*ServerConfig)
 
@@ -32,6 +34,7 @@ type ServerConfig struct {
 	ProxyURL string
 
 	// RecordMode enables recording of proxied exchanges.
+	// Reserved for future use — currently has no effect.
 	RecordMode bool
 
 	// StubFiles is a list of YAML/JSON files to load stubs from at startup.
@@ -56,6 +59,16 @@ type ServerConfig struct {
 	// When zero (default), the RNG is seeded from the current time, matching
 	// the behavior of the unseeded math/rand global source.
 	RandSeed int64
+
+	// ShutdownTimeout is the maximum duration to wait for in-flight requests
+	// during graceful shutdown. After this timeout, remaining connections are
+	// force-closed. Default is 30 seconds.
+	ShutdownTimeout time.Duration
+
+	// PrometheusEndpoint is an optional path for the Prometheus metrics handler.
+	// When set (e.g. "/metrics"), GET {path} returns all metrics in Prometheus text
+	// format. It is always available under /__admin/metrics/prometheus regardless.
+	PrometheusEndpoint string
 }
 
 // WithPort sets the listen port. Use 0 for a random available port.
@@ -110,9 +123,10 @@ func WithMaxRequests(n int) Option {
 // DefaultConfig returns a ServerConfig with sensible defaults.
 func DefaultConfig() ServerConfig {
 	return ServerConfig{
-		Port:        0,
-		AdminPort:   0,
-		MaxRequests: 1000,
+		Port:            0,
+		AdminPort:       0,
+		MaxRequests:     1000,
+		ShutdownTimeout: 30 * time.Second,
 	}
 }
 
@@ -137,6 +151,8 @@ func WithCORSEnabled() Option {
 }
 
 // WithGzip enables or disables automatic gzip response compression.
+// Note: WithGzip(false) disables gzip (sets DisableGzip=true).
+// WithGzip(true) enables gzip (sets DisableGzip=false), which is the default.
 func WithGzip(enabled bool) Option {
 	return func(c *ServerConfig) {
 		c.DisableGzip = !enabled
@@ -150,5 +166,25 @@ func WithGzip(enabled bool) Option {
 func WithRandSeed(seed int64) Option {
 	return func(c *ServerConfig) {
 		c.RandSeed = seed
+	}
+}
+
+// WithShutdownTimeout sets the maximum duration to wait for in-flight requests
+// during graceful shutdown. After this timeout, remaining connections are
+// force-closed. Use 0 or a negative value to disable the timeout (wait forever).
+// Default is 30 seconds.
+func WithShutdownTimeout(d time.Duration) Option {
+	return func(c *ServerConfig) {
+		c.ShutdownTimeout = d
+	}
+}
+
+// WithPrometheusEndpoint enables a Prometheus metrics endpoint at the given path.
+// When set, GET {path} returns all gmock metrics in Prometheus text format
+// (exposition v0.0.4). The metrics are always available at /__admin/metrics/prometheus
+// regardless of this setting.
+func WithPrometheusEndpoint(path string) Option {
+	return func(c *ServerConfig) {
+		c.PrometheusEndpoint = path
 	}
 }

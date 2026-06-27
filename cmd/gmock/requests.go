@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
+	"net/url"
 
 	"github.com/spf13/cobra"
 )
@@ -19,23 +19,33 @@ func newRequestsCmd() *cobra.Command {
 			adminURL, _ := cmd.Flags().GetString("admin-url")
 			filter, _ := cmd.Flags().GetString("filter")
 
-			url := adminURL + "/__admin/requests"
+			u, err := url.Parse(adminURL + "/__admin/requests")
+			if err != nil {
+				return fmt.Errorf("invalid admin URL: %w", err)
+			}
 			if filter != "" {
-				url += "?filter=" + filter
+				q := u.Query()
+				q.Set("filter", filter)
+				u.RawQuery = q.Encode()
 			}
 
-			resp, err := http.Get(url)
+			resp, err := commonClient.Get(u.String())
 			if err != nil {
-				return err
+				return fmt.Errorf("connect to server: %w", err)
 			}
 			defer resp.Body.Close()
+
+			if resp.StatusCode >= 400 {
+				body, _ := io.ReadAll(resp.Body)
+				return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
+			}
 
 			body, _ := io.ReadAll(resp.Body)
 			var pretty bytes.Buffer
 			if err := json.Indent(&pretty, body, "", "  "); err == nil {
-				fmt.Println(pretty.String())
+				fmt.Fprintln(cmd.OutOrStdout(), pretty.String())
 			} else {
-				fmt.Println(string(body))
+				fmt.Fprintln(cmd.OutOrStdout(), string(body))
 			}
 			return nil
 		},

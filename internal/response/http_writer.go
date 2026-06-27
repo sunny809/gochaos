@@ -624,7 +624,14 @@ func (w *HTTPWriter) WriteCORSHeaders(rw http.ResponseWriter, r *http.Request, o
 
 	// Set allowed origin
 	if len(opts.AllowedOrigins) == 0 || opts.AllowedOrigins[0] == "*" {
-		rw.Header().Set("Access-Control-Allow-Origin", "*")
+		// Per RFC 6454, Access-Control-Allow-Origin: * is not allowed when
+		// AllowCredentials is true. In that case, echo the request's Origin
+		// header instead (which is the standard workaround).
+		if opts.AllowCredentials && origin != "" {
+			rw.Header().Set("Access-Control-Allow-Origin", origin)
+		} else {
+			rw.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 	} else {
 		for _, allowed := range opts.AllowedOrigins {
 			if allowed == origin {

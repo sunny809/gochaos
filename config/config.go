@@ -43,10 +43,15 @@ func LoadStubsFromFile(path string) ([]spec.StubDefinition, error) {
 		return parseJSON(data)
 	default:
 		// Try JSON first, fall back to YAML
-		if stubs, err := parseJSON(data); err == nil {
+		stubs, jsonErr := parseJSON(data)
+		if jsonErr == nil {
 			return stubs, nil
 		}
-		return parseYAML(data)
+		stubs, yamlErr := parseYAML(data)
+		if yamlErr == nil {
+			return stubs, nil
+		}
+		return nil, fmt.Errorf("config: parse JSON: %w; parse YAML: %w", jsonErr, yamlErr)
 	}
 }
 
@@ -93,7 +98,7 @@ func parseYAML(data []byte) ([]spec.StubDefinition, error) {
 
 	// Try array of stubs
 	var array []spec.StubDefinition
-	if err := yaml.Unmarshal(data, &array); err == nil && len(array) > 0 {
+	if err := yaml.Unmarshal(data, &array); err == nil {
 		return array, nil
 	}
 

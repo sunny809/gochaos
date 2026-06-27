@@ -53,6 +53,7 @@ type NearMissRequest struct {
 // breakdowns. Stubs that fully match are omitted by Engine.Compute, so an
 // exact-match request returns an empty nearMisses array (not 404).
 func (h *Handler) nearMiss(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 	var req NearMissRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())

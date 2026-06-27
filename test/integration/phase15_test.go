@@ -20,7 +20,7 @@ func TestPhase15_FaultLogAdminAPI(t *testing.T) {
 	requestLog := log.New(100)
 	faultLog := faultlog.NewFaultInjectionLog(100)
 	engine := nearmiss.NewEngine()
-	h := admin.New(registry, requestLog, faultLog, engine)
+	h := admin.New(registry, requestLog, faultLog, engine, nil)
 
 	// Test 1: Empty fault log
 	t.Run("empty_fault_log", func(t *testing.T) {

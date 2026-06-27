@@ -1,6 +1,6 @@
 # Roadmap
 
-> **Last updated:** 2026-06-19
+> **Last updated:** 2026-06-27
 > **Status:** Living document — the single source of truth for what gochaos is and where it's going.
 
 This roadmap answers one question for the open-source community:
@@ -25,14 +25,14 @@ This roadmap answers one question for the open-source community:
 |---|---|---|
 | **Burst-shaped** (seconds-to-minutes) | Faults activatable by probability, by request count, by time window — not just always-on | ✅ Phase 1 shipped (A1-A11) |
 | **Reproducible** | Same test run twice → same fault sequence. Probabilistic chaos is debuggable | ✅ WithRandSeed shipped (A11) |
-| **Observable** | Test code can assert "X faults of type Y were injected" | 📋 Phase 1.5 planned |
+| **Observable** | Test code can assert "X faults of type Y were injected" | ✅ Phase 1.5 shipped (O1-O3) |
 
 ### Core user personas
 
 | Persona | Pain point | gochaos solution |
 |---------|-----------|-----------------|
 | **Go developer** | Need to inject intermittent failures in tests | Embed gmock in Go test, use probabilistic/everyNthRequest/time-window activation |
-| **CI/CD maintainer** | Non-Go team needs mock in CI pipeline | `docker run ghcr.io/sunny809/gochaos` (Phase 2) |
+| **CI/CD maintainer** | Non-Go team needs mock in CI pipeline | ✅ `docker run ghcr.io/sunny809/gochaos` |
 | **Chaos engineer** | Need reproducible chaos sequences | WithRandSeed(42) + deterministic fault ordering |
 | **WireMock migrator** | Low-cost migration from Java to Go | Deferred to v1.1 (small niche) |
 
@@ -81,28 +81,24 @@ Make chaos **CI-gateable** — assertions on what actually fired.
 
 **Why this matters**: WireMock faults are always-on, so it has no injection log. gochaos faults are conditional (probabilistic/Nth/time-window), so we **must** record what fired for CI assertions.
 
-### Phase 2 — Deployability 📋 NEXT (~2h)
+### Phase 2 — Deployability ✅ COMPLETE
 
-Unlock non-Go teams via Docker + K8s.
-
-| ID | Work | Effort |
+| ID | Work | Status |
 |----|------|--------|
-| D1 | Docker image via GoReleaser → ghcr.io | 1h |
-| D2 | Liveness probe `GET /__admin/health/live` | 15min |
-| D3 | Readiness probe `GET /__admin/health/ready` | 15min |
-| D4 | Graceful shutdown timeout | 30min |
+| D1 | Docker image via GoReleaser → ghcr.io | ✅ Sprint 04 |
+| D2 | Liveness probe `GET /__admin/health/live` | ✅ Sprint 05 |
+| D3 | Readiness probe `GET /__admin/health/ready` | ✅ Sprint 05 |
+| D4 | Graceful shutdown timeout | ✅ Sprint 05 |
 
-**Why Docker is highest ROI**: `docker run ghcr.io/sunny809/gochaos` makes gochaos accessible to Java, Python, Node, bash teams — not just Go developers.
+### Phase 3 — Maturity ✅ COMPLETE
 
-### Phase 3 — Maturity 📋 PLANNED (~6h)
-
-| ID | Work | Effort |
+| ID | Work | Status |
 |----|------|--------|
-| M1 | Metrics system (8 expvar counters) | 1h |
-| M2 | `GET /__admin/metrics` endpoint | 30min |
-| M3 | Inflection benchmark (prove mock is not bottleneck) | 2h |
-| D5 | README positioning as "fault-burst generator" | 30min |
-| R1 | v1.0.0 release (CHANGELOG, tag, pkg.go.dev) | 2h |
+| M1 | Metrics system (8 expvar counters) | ✅ Sprint 05 |
+| M2 | `GET /__admin/metrics` endpoint | ✅ Sprint 05 |
+| M3 | Inflection benchmark (prove mock is not bottleneck) | ✅ Sprint 05 |
+| D5 | README positioning as "fault-burst generator" | ✅ Sprint 05 |
+| R1 | v1.0.0 release (CHANGELOG, tag, pkg.go.dev) | 📋 Tag pending |
 
 ### Phase 4 — Growth (v1.1)
 
@@ -146,7 +142,7 @@ Features that expand reach but are **not required for v1.0 MVP**.
 | **Seedable RNG** | ✅ | ❌ | ❌ |
 | **Embeddable library** | ✅ (Go) | ✅ (Java) | ✅ (RoundTripper) |
 | **Real HTTP server** | ✅ | ✅ | ❌ |
-| **Docker image** | 📋 Phase 2 | ✅ | ❌ |
+| **Docker image** | ✅ v1.0 | ✅ | ❌ |
 | **Callbacks/webhooks** | 📋 v1.1 | ✅ | ❌ |
 | **OpenAPI import** | 📋 v1.1 | ❌ | ❌ |
 | **Stateful scenarios** | ❌ (cut) | ✅ | ❌ |
@@ -157,13 +153,25 @@ Features that expand reach but are **not required for v1.0 MVP**.
 
 ## 5. Execution timeline
 
-### v1.0 MVP (~4h remaining)
+### v1.0 MVP ✅ COMPLETE
 
 ```
-Week 1: Phase 1.5 (O1-O3)       3h  — Fault-injection log + verify API
-Week 2: Phase 2 (D1-D4)         2h  — Docker + K8s probes + graceful shutdown
-Week 3: Phase 3 (M1-M3, D5, R1) 6h  — Metrics + positioning + v1.0.0 release
+Sprint 01 (Jun 13-14): Slices 1-7                     Core server + CLI
+Sprint 02 (Jun 14-19): N1-N3, A1-A11                  Near-miss + Chaos Depth
+Sprint 03 (Jun 19-21): O1-O3                           Chaos Observability
+Sprint 04 (Jun 21):    D1                              Release pipeline
+Sprint 05 (Jun 23):    D2-D4, M1-M3, D5, R1           Deployability + Metrics + v1.0
 ─── v1.0.0 published ───
+```
+
+### Sprint 06 — Ecosystem Extension (v0.1.1)
+
+```
+Core:  Prometheus self-export endpoint (WritePrometheus, WithPrometheusEndpoint, /__admin/metrics/prometheus)
+Repo:  gochaos/scenarios — 8 YAML chaos scenarios + gm CLI
+Repo:  gochaos/prometheus — Grafana dashboard (7 panels) + Docker Compose stack
+Test:  BDD test suite (godog) with P1 core API coverage
+─── v0.1.1 published ───
 ```
 
 ### v1.1 (post-release)
