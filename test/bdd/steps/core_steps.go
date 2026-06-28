@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cucumber/godog"
@@ -35,7 +36,10 @@ func (tc *TestContext) aCleanMockServerOnARandomPort() error {
 
 // aStubForMethodPathReturnsStatus registers a stub for the given method + path.
 func (tc *TestContext) aStubForMethodPathReturnsStatus(method, path, statusStr string) error {
-	status := parseInt(statusStr)
+	status, err := parseInt(statusStr)
+	if err != nil {
+		return fmt.Errorf("invalid status code %q: %w", statusStr, err)
+	}
 	def := gmock.StubDefinition{
 		Request: gmock.RequestPattern{
 			Method:  method,
@@ -55,7 +59,10 @@ func (tc *TestContext) aStubForMethodPathReturnsStatus(method, path, statusStr s
 
 // aStubForMethodPathReturnsStatusWithBody registers a stub with a response body.
 func (tc *TestContext) aStubForMethodPathReturnsStatusWithBody(method, path, statusStr, body string) error {
-	status := parseInt(statusStr)
+	status, err := parseInt(statusStr)
+	if err != nil {
+		return fmt.Errorf("invalid status code %q: %w", statusStr, err)
+	}
 	def := gmock.StubDefinition{
 		Request: gmock.RequestPattern{
 			Method:  method,
@@ -81,7 +88,10 @@ func (tc *TestContext) iSendARequestTo(method, path string) error {
 
 // theResponseStatusIs asserts the last response status code.
 func (tc *TestContext) theResponseStatusIs(statusStr string) error {
-	expected := parseInt(statusStr)
+	expected, err := parseInt(statusStr)
+	if err != nil {
+		return fmt.Errorf("invalid status code %q: %w", statusStr, err)
+	}
 	if tc.response == nil {
 		return fmt.Errorf("no response received")
 	}
@@ -104,7 +114,10 @@ func (tc *TestContext) theResponseBodyIs(expected string) error {
 
 // theStubMatchedNRequests verifies via the Verify API.
 func (tc *TestContext) theStubMatchedNRequests(stubName, countStr string) error {
-	expectedCount := parseInt(countStr)
+	expectedCount, err := parseInt(countStr)
+	if err != nil {
+		return fmt.Errorf("invalid count %q: %w", countStr, err)
+	}
 	pattern := gmock.RequestPattern{
 		URLPath: stubName,
 	}
@@ -142,10 +155,7 @@ func (tc *TestContext) iResetTheServer() error {
 }
 
 // parseInt converts a string to int for step argument parsing.
-func parseInt(s string) int {
-	var n int
-	for _, c := range s {
-		n = n*10 + int(c-'0')
-	}
-	return n
+// Returns an error if the string is not a valid non-negative integer.
+func parseInt(s string) (int, error) {
+	return strconv.Atoi(s)
 }

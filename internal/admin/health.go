@@ -26,8 +26,12 @@ func (h *Handler) HealthReady(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	stubCount := 0
+	if h.registry != nil {
+		stubCount = h.registry.Len()
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "ready",
-		"stubCount": h.registry.Len(),
+		"stubCount": stubCount,
 	})
 }

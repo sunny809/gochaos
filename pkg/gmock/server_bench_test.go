@@ -75,13 +75,12 @@ func BenchmarkFullPipeline(b *testing.B) {
 
 			resp, err := client.Get(baseURL + path)
 			if err != nil {
-				b.Errorf("request failed: %v", err)
-				continue
+				b.Fatalf("request failed: %v", err)
 			}
 			resp.Body.Close()
 
 			if resp.StatusCode != http.StatusOK {
-				b.Errorf("expected 200, got %d", resp.StatusCode)
+				b.Fatalf("expected 200, got %d", resp.StatusCode)
 			}
 		}
 	})
@@ -121,13 +120,12 @@ func BenchmarkNoMatch(b *testing.B) {
 			// Send to a path that doesn't match any stub
 			resp, err := client.Get(baseURL + "/api/no-match")
 			if err != nil {
-				b.Errorf("request failed: %v", err)
-				continue
+				b.Fatalf("request failed: %v", err)
 			}
 			resp.Body.Close()
 
 			if resp.StatusCode != http.StatusNotFound {
-				b.Errorf("expected 404, got %d", resp.StatusCode)
+				b.Fatalf("expected 404, got %d", resp.StatusCode)
 			}
 		}
 	})

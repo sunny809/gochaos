@@ -82,19 +82,24 @@ func IsAdminPath(path string) bool {
 // Dispatches to the appropriate handler method based on path and method.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	// Increment admin operations counter for all non-health admin requests.
-	if h.metrics != nil && !strings.HasPrefix(path, Prefix+"health") {
-		h.metrics.Add("admin_operations", 1)
-	}
 
 	switch {
 	case path == Prefix+"mappings" || path == Prefix+"mappings/":
 		switch r.Method {
 		case http.MethodGet:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.listMappings(w, r)
 		case http.MethodPost:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.createMapping(w, r)
 		case http.MethodDelete:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.deleteAllMappings(w, r)
 		default:
 			methodNotAllowed(w)
@@ -104,8 +109,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(path, Prefix+"mappings/")
 		switch r.Method {
 		case http.MethodGet:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.getMapping(w, r, id)
 		case http.MethodDelete:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.deleteMapping(w, r, id)
 		default:
 			methodNotAllowed(w)
@@ -116,6 +127,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 			return
 		}
+		if h.metrics != nil {
+			h.metrics.Add("admin_operations", 1)
+		}
 		h.reset(w, r)
 
 	case path == Prefix+"nearmiss":
@@ -123,13 +137,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 			return
 		}
+		if h.metrics != nil {
+			h.metrics.Add("admin_operations", 1)
+		}
 		h.nearMiss(w, r)
 
 	case path == Prefix+"requests":
 		switch r.Method {
 		case http.MethodGet:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.listRequests(w, r)
 		case http.MethodDelete:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.clearRequests(w, r)
 		default:
 			methodNotAllowed(w)
@@ -138,8 +161,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == Prefix+"fault-log":
 		switch r.Method {
 		case http.MethodGet:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.listFaultLog(w, r)
 		case http.MethodDelete:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
 			h.clearFaultLog(w, r)
 		default:
 			methodNotAllowed(w)
@@ -159,12 +188,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 			return
 		}
+		if h.metrics != nil {
+			h.metrics.Add("admin_operations", 1)
+		}
 		h.prometheusHandler(w, r)
 
 	case path == Prefix+"metrics" || path == Prefix+"metrics/":
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
 			return
+		}
+		if h.metrics != nil {
+			h.metrics.Add("admin_operations", 1)
 		}
 		h.metricsHandler(w, r)
 

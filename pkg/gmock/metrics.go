@@ -100,13 +100,21 @@ func (m *Metrics) Snapshot() map[string]int64 {
 // No external Prometheus client library is used; the format is self-contained.
 // Note: each call allocates a snapshot map — this is acceptable for monitoring
 // scrape intervals (typically 15s) but not for per-request hot paths.
-func (m *Metrics) WritePrometheus(w io.Writer) {
+// Returns an error if writing to w fails.
+func (m *Metrics) WritePrometheus(w io.Writer) error {
 	snap := m.Snapshot()
 	for _, pm := range m.promMetrics {
-		_, _ = fmt.Fprintf(w, "# HELP %s %s\n", pm.name, pm.help)
-		_, _ = fmt.Fprintf(w, "# TYPE %s %s\n", pm.name, pm.typ)
-		_, _ = fmt.Fprintf(w, "%s %d\n", pm.name, snap[pm.field])
+		if _, err := fmt.Fprintf(w, "# HELP %s %s\n", pm.name, pm.help); err != nil {
+			return fmt.Errorf("write HELP for %s: %w", pm.name, err)
+		}
+		if _, err := fmt.Fprintf(w, "# TYPE %s %s\n", pm.name, pm.typ); err != nil {
+			return fmt.Errorf("write TYPE for %s: %w", pm.name, err)
+		}
+		if _, err := fmt.Fprintf(w, "%s %d\n", pm.name, snap[pm.field]); err != nil {
+			return fmt.Errorf("write value for %s: %w", pm.name, err)
+		}
 	}
+	return nil
 }
 
 // resetAll sets all counters to zero. Called during server Reset().

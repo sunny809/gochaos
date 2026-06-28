@@ -32,8 +32,9 @@ func (m *testMetrics) Snapshot() map[string]int64 {
 }
 
 func (m *testMetrics) Add(name string, delta int64) {}
-func (m *testMetrics) WritePrometheus(w io.Writer) {
-	w.Write([]byte("# HELP test\n# TYPE test gauge\ntest 0\n"))
+func (m *testMetrics) WritePrometheus(w io.Writer) error {
+	_, err := w.Write([]byte("# HELP test\n# TYPE test gauge\ntest 0\n"))
+	return err
 }
 
 func setupTest() (*Handler, *stub.Registry, *log.RequestLog) {

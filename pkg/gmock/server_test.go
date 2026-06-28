@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/sunny809/gochaos/pkg/gmock"
@@ -299,5 +300,101 @@ func TestWriteNoMatch_EmptyRegistry(t *testing.T) {
 	}
 	if len(arr) != 0 {
 		t.Errorf("expected empty JSON array, got %d entries: %v", len(arr), arr)
+	}
+}
+
+func TestPrometheusEndpoint(t *testing.T) {
+	srv := gmock.NewServer(
+		gmock.WithPort(0),
+		gmock.WithPrometheusEndpoint("/metrics"),
+	)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer srv.Stop()
+
+	// Test the custom Prometheus endpoint
+	resp, err := http.Get(srv.URL() + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	// Verify Prometheus text format
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "# HELP gochaos_") {
+		t.Errorf("expected Prometheus HELP lines, got:\n%s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "# TYPE gochaos_") {
+		t.Errorf("expected Prometheus TYPE lines, got:\n%s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "gochaos_requests_total") {
+		t.Errorf("expected gochaos_requests_total metric, got:\n%s", bodyStr)
+	}
+
+	// Verify Content-Type header
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "text/plain; version=0.0.4" {
+		t.Errorf("expected Content-Type 'text/plain; version=0.0.4', got %q", contentType)
+	}
+}
+
+func TestPrometheusEndpointAdminRoute(t *testing.T) {
+	srv := gmock.NewServer(gmock.WithPort(0))
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer srv.Stop()
+
+	// Test the admin /__admin/metrics/prometheus route
+	resp, err := http.Get(srv.URL() + "/__admin/metrics/prometheus")
+	if err != nil {
+		t.Fatalf("GET /__admin/metrics/prometheus: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "gochaos_") {
+		t.Errorf("expected gochaos_ metrics, got:\n%s", bodyStr)
+	}
+}
+
+func TestPrometheusEndpointMethodNotAllowed(t *testing.T) {
+	srv := gmock.NewServer(
+		gmock.WithPort(0),
+		gmock.WithPrometheusEndpoint("/metrics"),
+	)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer srv.Stop()
+
+	// POST should return 405
+	resp, err := http.Post(srv.URL()+"/metrics", "text/plain", nil)
+	if err != nil {
+		t.Fatalf("POST /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST, got %d", resp.StatusCode)
 	}
 }

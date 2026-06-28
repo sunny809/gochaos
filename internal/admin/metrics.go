@@ -2,6 +2,7 @@ package admin
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 )
 
@@ -11,7 +12,7 @@ import (
 type MetricsProvider interface {
 	Snapshot() map[string]int64
 	Add(name string, delta int64)
-	WritePrometheus(w io.Writer)
+	WritePrometheus(w io.Writer) error
 }
 
 // metricsHandler handles GET /__admin/metrics.
@@ -32,5 +33,7 @@ func (h *Handler) prometheusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	h.metrics.WritePrometheus(w)
+	if err := h.metrics.WritePrometheus(w); err != nil {
+		slog.Warn("failed to write Prometheus metrics", "error", err)
+	}
 }

@@ -228,7 +228,9 @@ func (s *mockServer) buildMainHandler(includeAdmin bool) http.Handler {
 				return
 			}
 			w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-			s.metrics.WritePrometheus(w)
+			if err := s.metrics.WritePrometheus(w); err != nil {
+				s.logger.Warn("failed to write Prometheus metrics", "error", err)
+			}
 		})
 	}
 
