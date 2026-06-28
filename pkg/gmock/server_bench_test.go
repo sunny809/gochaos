@@ -3,17 +3,13 @@ package gmock_test
 import (
 	"fmt"
 	"net/http"
-	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sunny809/gochaos/pkg/gmock"
 )
 
-// BenchmarkFullPipeline measures the end-to-end request matching + response
-// pipeline throughput. It registers 100 stubs, then sends concurrent requests
-// and measures how many complete per second.
-//
-// Target: ≥10,000 req/sec on an 8-core machine.
+// startBenchServer starts a gmock server on a random port for benchmarks.
 func startBenchServer(b *testing.B) gmock.Server {
 	server := gmock.NewServer(gmock.WithPort(0))
 	if err := server.Start(); err != nil {
@@ -23,6 +19,11 @@ func startBenchServer(b *testing.B) gmock.Server {
 	return server
 }
 
+// BenchmarkFullPipeline measures the end-to-end request matching + response
+// pipeline throughput. It registers 100 stubs, then sends concurrent requests
+// and measures how many complete per second.
+//
+// Target: ≥10,000 req/sec on an 8-core machine.
 func BenchmarkFullPipeline(b *testing.B) {
 	// Register 100 stubs with varying paths
 	srv := startBenchServer(b)
@@ -60,40 +61,30 @@ func BenchmarkFullPipeline(b *testing.B) {
 		resp.Body.Close()
 	}
 
-	// Benchmark with 100 concurrent goroutines
+	// Benchmark with 100 concurrent goroutines handled by RunParallel.
+	// Use an atomic counter to distribute requests across stub paths.
 	b.ResetTimer()
 	b.SetParallelism(100)
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 100) // concurrency limiter
+	var counter atomic.Int64
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			sem <- struct{}{}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
+			idx := counter.Add(1) % 100
+			path := fmt.Sprintf("/api/resource/%d", idx)
 
-				// Pick a stub path
-				idx := b.N % 100
-				path := fmt.Sprintf("/api/resource/%d", idx)
+			resp, err := client.Get(baseURL + path)
+			if err != nil {
+				b.Errorf("request failed: %v", err)
+				continue
+			}
+			resp.Body.Close()
 
-				resp, err := client.Get(baseURL + path)
-				if err != nil {
-					b.Errorf("request failed: %v", err)
-					return
-				}
-				resp.Body.Close()
-
-				if resp.StatusCode != http.StatusOK {
-					b.Errorf("expected 200, got %d", resp.StatusCode)
-				}
-			}()
+			if resp.StatusCode != http.StatusOK {
+				b.Errorf("expected 200, got %d", resp.StatusCode)
+			}
 		}
 	})
-
-	wg.Wait()
 }
 
 // BenchmarkNoMatch measures throughput for unmatched requests (404 path).

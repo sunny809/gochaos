@@ -129,7 +129,7 @@ func NewServer(opts ...Option) Server {
 		nearMissEngine: nearmiss.NewEngine(),
 		requestLog:     requestLog,
 		faultLog:       faultLog,
-		metrics:        newMetrics(),
+		metrics:        metrics,
 		adminHandler:   admin.New(registry, requestLog, faultLog, nearmiss.NewEngine(), metrics),
 		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip, globalRand),
 		globalRand:     globalRand,

@@ -1,6 +1,8 @@
 package steps
 
+import "github.com/cucumber/godog"
+
 // registerChaosSteps registers all P2 chaos injection step definitions.
-// Placeholder for future implementation.
-func registerChaosSteps(ctx interface{}, tc *TestContext) {
+// TODO(P2): Implement chaos step definitions for fault injection, delays, activation modes.
+func registerChaosSteps(ctx *godog.ScenarioContext, tc *TestContext) {
 }

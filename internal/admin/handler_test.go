@@ -201,7 +201,7 @@ func TestClearFaultLog(t *testing.T) {
 		t.Errorf("expected cleared=true, got %v", result["cleared"])
 	}
 	if result["count"] != float64(1) {
-		t.Errorf("expected cleared=1, got %d", result["cleared"])
+		t.Errorf("expected count=1, got %v", result["count"])
 	}
 
 	if h.faultLog.Len() != 0 {
