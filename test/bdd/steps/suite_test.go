@@ -18,12 +18,12 @@ func TestBDD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot get working dir: %v", err)
 	}
-	featurePath := filepath.Join(pkgDir, "..", "features", "core")
+	featuresDir := filepath.Join(pkgDir, "..", "features")
 
 	suite := godog.TestSuite{
 		Name: "gmock",
 		Options: &godog.Options{
-			Paths:    []string{featurePath},
+			Paths:    []string{filepath.Join(featuresDir, "core"), filepath.Join(featuresDir, "chaos"), filepath.Join(featuresDir, "admin")},
 			Format:   "pretty",
 			Strict:   false,
 			NoColors: true,
