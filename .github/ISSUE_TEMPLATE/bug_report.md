@@ -4,6 +4,13 @@ description: Report a bug in gmock
 labels: ["bug"]
 ---
 
+## Persona
+
+<!-- Which best describes you? -->
+- [ ] Go developer (embedding gmock in tests)
+- [ ] CI/CD maintainer (running gmock as standalone server or Docker)
+- [ ] Chaos engineer (configuring fault injection scenarios)
+
 ## Version
 
 - gmock version: <!-- e.g., v1.2.3 or commit hash -->

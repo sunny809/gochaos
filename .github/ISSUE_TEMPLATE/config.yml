@@ -2,4 +2,7 @@ blank_issues_enabled: false
 contact_links:
   - name: gmock Questions & Discussions
     url: https://github.com/sunny809/gochaos/discussions
-    about: Please use the issue templates, or use Discussions for questions.
+    about: Ask questions, share use cases, or discuss gmock configuration. Use Discussions instead of opening an issue.
+  - name: Security Vulnerability
+    url: https://github.com/sunny809/gochaos/security/advisories
+    about: Report security vulnerabilities privately via GitHub Security Advisories. Do not open public issues for vulnerabilities.

@@ -4,9 +4,10 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.x     | :white_check_mark: |
+| v1.0.x  | :white_check_mark: |
+| main    | :white_check_mark: |
 
-gochaos is currently in pre-v1.0 development. All 0.x releases receive security updates.
+Security updates are applied to the latest release on the `main` branch. Pre-release versions (0.x) are no longer actively maintained.
 
 ## Reporting a Vulnerability
 
@@ -32,10 +33,33 @@ Instead, please report security issues privately using one of these methods:
 
 ### Response timeline
 
-- **Initial response**: Within 48 hours
-- **Triage**: Within 7 days
-- **Fix**: Critical vulnerabilities will be patched ASAP
-- **Disclosure**: After fix is released, we'll publish a security advisory
+- **Acknowledgment**: Within 48 hours
+- **Initial assessment**: Within 5 business days
+- **Fix**: Critical vulnerabilities will be patched as soon as possible; lower-severity issues are addressed in the next release
+- **Disclosure**: After the fix is released, we will publish a GitHub Security Advisory with credit to the reporter
+
+## Scope
+
+### In Scope
+
+- **gmock core library** (`pkg/gmock/`, `internal/`) — stub registry, matching engine, response pipeline
+- **Admin API** (`internal/admin/`) — all `/__admin/*` endpoints
+- **CLI binary** (`cmd/gmock/`) — command-line interface
+
+### Out of Scope
+
+- **Third-party dependencies** — report vulnerabilities upstream to the dependency maintainers
+- **Companion repositories** — scenarios repo, Prometheus exporter repo, and other non-core repositories
+- **Denial of service** via the admin API when exposed to the public internet (the admin API is designed for localhost use)
+
+## Automated Security Scanning
+
+The following CI workflows run automatically:
+
+| Workflow | Schedule | Purpose |
+|----------|----------|---------|
+| [CodeQL](https://github.com/sunny809/gochaos/blob/main/.github/workflows/codeql.yml) | Every push/PR + weekly | Static analysis for Go security vulnerabilities |
+| [govulncheck](https://github.com/sunny809/gochaos/blob/main/.github/workflows/vulncheck.yml) | Weekly + manual trigger | Go dependency vulnerability scanning |
 
 ## Security Best Practices
 
@@ -45,6 +69,7 @@ When using gochaos in production:
 - **Use `--admin-port`** on a separate internal interface if needed
 - **Validate stub configurations** from untrusted sources before loading
 - **Review proxy configurations** if using `--proxy-url` mode
+- **Review callback URLs** — callbacks are SSRF-protected (private IPs are blocked), but validate that callback targets are intentional
 
 ## Known Security Considerations
 
@@ -52,7 +77,7 @@ When using gochaos in production:
 |---------|------|------------|
 | Admin API | Unauthorized stub manipulation | Bind to localhost, use network policies |
 | Proxy mode | SSRF via proxy URL | Only proxy to trusted upstreams |
-| Callbacks (planned) | SSRF via callback URL | Allowlist configuration (Sprint 8) |
+| Callbacks | SSRF via callback URL | DNS-time SSRF guard blocks private/reserved IPs (loopback, link-local, RFC 1918, RFC 6598) |
 
 ---
 
