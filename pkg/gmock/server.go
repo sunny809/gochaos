@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 	"github.com/PaesslerAG/jsonpath"
 	"github.com/sunny809/gochaos/config"
 	"github.com/sunny809/gochaos/internal/admin"
+	"github.com/sunny809/gochaos/internal/callback"
+	"github.com/sunny809/gochaos/internal/callbacklog"
 	"github.com/sunny809/gochaos/internal/faultlog"
 	internallog "github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
@@ -64,6 +67,9 @@ type Server interface {
 	// VerifyFaultsInjected checks that faults matching the given pattern were injected.
 	VerifyFaultsInjected(pattern FaultPattern, count int) FaultVerificationResult
 
+	// VerifyCallbacks checks that callbacks matching the given pattern were dispatched.
+	VerifyCallbacks(pattern CallbackPattern, count int) CallbackVerificationResult
+
 	// RequestLog returns all logged requests.
 	RequestLog() []LoggedRequest
 
@@ -95,6 +101,8 @@ type mockServer struct {
 	nearMissEngine *nearmiss.Engine
 	requestLog     *internallog.RequestLog
 	faultLog       *faultlog.FaultInjectionLog
+	callbackLog    *callbacklog.Log
+	callbackDisp   *callback.Dispatcher
 	adminHandler   *admin.Handler
 	responseWriter response.Writer
 	globalRand     randx.RNG
@@ -118,8 +126,12 @@ func NewServer(opts ...Option) Server {
 	registry := stub.NewRegistry()
 	requestLog := internallog.New(cfg.MaxRequests)
 	faultLog := faultlog.NewFaultInjectionLog(cfg.MaxRequests)
+	callbackLog := callbacklog.New(cfg.MaxRequests)
 	globalRand := randx.NewGlobal(cfg.RandSeed)
 	metrics := newMetrics()
+
+	callbackDisp := callback.NewDispatcher(logger, callbackLog, cfg.CallbackTimeout, cfg.CallbackEnabled)
+	callbackDisp.SetSSRFBypass(cfg.callbackSSRFBypass)
 
 	return &mockServer{
 		config:         cfg,
@@ -129,8 +141,10 @@ func NewServer(opts ...Option) Server {
 		nearMissEngine: nearmiss.NewEngine(),
 		requestLog:     requestLog,
 		faultLog:       faultLog,
+		callbackLog:    callbackLog,
+		callbackDisp:   callbackDisp,
 		metrics:        metrics,
-		adminHandler:   admin.New(registry, requestLog, faultLog, nearmiss.NewEngine(), metrics),
+		adminHandler:   admin.New(registry, requestLog, faultLog, callbackLog, nearmiss.NewEngine(), metrics),
 		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip, globalRand),
 		globalRand:     globalRand,
 	}
@@ -282,6 +296,11 @@ func (s *mockServer) Stop() error {
 		s.adminListener = nil
 	}
 
+	// Wait for in-flight callbacks to complete before returning.
+	ctx, cancel := s.shutdownContext()
+	defer cancel()
+	s.callbackDisp.WaitInFlight(ctx)
+
 	if len(errs) > 0 {
 		return fmt.Errorf("gmock: shutdown errors: %v", errs)
 	}
@@ -363,12 +382,13 @@ func (s *mockServer) ClearStubs() {
 	s.registry.DeleteAll()
 }
 
-// Reset clears all stubs, request log, fault log, and resets all metrics.
+// Reset clears all stubs, request log, fault log, callback log, and resets all metrics.
 func (s *mockServer) Reset() {
 	s.metrics.resetAll()
 	s.registry.DeleteAll()
 	s.requestLog.Clear()
 	s.faultLog.Clear()
+	s.callbackLog.Clear()
 }
 
 // RecordedStubs returns stubs recorded from proxy mode.
@@ -502,7 +522,18 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 			ActivationMode: faultInfo.ActivationMode,
 		})
 	}
-}
+
+		// Dispatch async callback (fire-and-forget)
+		if result.Stub.Response.Callback != nil {
+			s.callbackDisp.Dispatch(result.Stub.Response.Callback, result.Stub.ID, callback.RequestContext{
+				Method:      r.Method,
+				Path:        r.URL.Path,
+				QueryString: r.URL.RawQuery,
+				Headers:     headersToMap(r.Header),
+				Body:        readBodyForCallback(r),
+			})
+		}
+	}
 
 // writeRateLimited writes a rate-limit response when the token bucket is empty.
 // The status code defaults to 429 (Too Many Requests) unless RateLimitStatus
@@ -696,6 +727,57 @@ func matchFaultPattern(pattern FaultPattern, entry spec.FaultInjectionEntry) boo
 		return false
 	}
 	if pattern.ActivationMode != "" && pattern.ActivationMode != string(entry.ActivationMode) {
+		return false
+	}
+	return true
+}
+
+// verifyCallbacks checks that callbacks matching the given pattern were dispatched.
+func (s *mockServer) verifyCallbacks(pattern CallbackPattern, count int) CallbackVerificationResult {
+	entries := s.callbackLog.List()
+	actualCount := 0
+
+	for _, entry := range entries {
+		if matchCallbackPattern(pattern, entry) {
+			actualCount++
+		}
+	}
+
+	result := CallbackVerificationResult{
+		ExpectedCount: count,
+		ActualCount:   actualCount,
+		Matched:       actualCount >= count,
+		Pattern:       pattern,
+	}
+
+	if !result.Matched {
+		result.Errors = append(result.Errors,
+			fmt.Sprintf("expected at least %d callback dispatches, got %d", count, actualCount))
+	}
+
+	// Special case: count == 0 means VerifyNoCallbacksDispatched (exact match)
+	if count == 0 {
+		result.Matched = actualCount == 0
+		if !result.Matched {
+			result.Errors = []string{fmt.Sprintf("expected no matching callback dispatches, got %d", actualCount)}
+		}
+	}
+
+	return result
+}
+
+// matchCallbackPattern checks if a callback entry matches a verification pattern.
+func matchCallbackPattern(pattern CallbackPattern, entry spec.CallbackEntry) bool {
+	if pattern.StubID != "" && pattern.StubID != entry.StubID {
+		return false
+	}
+	if pattern.URL != "" && pattern.URL != entry.CallbackURL {
+		return false
+	}
+	if pattern.Method != "" && !strings.EqualFold(pattern.Method, entry.RequestMethod) {
+		return false
+	}
+	if pattern.Status != "" && pattern.Status != string(entry.Status) {
 		return false
 	}
 	return true
@@ -909,4 +991,37 @@ func copyMap(m map[string]string) map[string]string {
 		result[k] = v
 	}
 	return result
+}
+
+// headersToMap converts http.Header to a flat map of string.
+// When a header has multiple values, only the first is used.
+// This is suitable for callback template context where simple
+// string values are expected.
+func headersToMap(h http.Header) map[string]string {
+	if len(h) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(h))
+	for k, vals := range h {
+		if len(vals) > 0 {
+			result[k] = vals[0]
+		}
+	}
+	return result
+}
+
+// readBodyForCallback reads the request body for callback template context.
+// The body is restored after reading so downstream handlers can still access it.
+// If reading fails or the body is empty, returns an empty string.
+func readBodyForCallback(r *http.Request) string {
+	if r.Body == nil {
+		return ""
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return ""
+	}
+	// Restore the body so downstream code can read it again
+	r.Body = io.NopCloser(strings.NewReader(string(body)))
+	return string(body)
 }

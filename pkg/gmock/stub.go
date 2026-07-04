@@ -101,3 +101,29 @@ type FaultPattern = spec.FaultPattern
 
 // FaultVerificationResult contains the outcome of a fault verification assertion.
 type FaultVerificationResult = spec.FaultVerificationResult
+
+// --- Callback types ---
+
+// CallbackDefinition defines an async post-response callback.
+type CallbackDefinition = spec.CallbackDefinition
+
+// CallbackStatus describes the outcome of a callback dispatch attempt.
+type CallbackStatus = spec.CallbackStatus
+
+// CallbackStatus constants.
+const (
+	CallbackDelivered  = spec.CallbackDelivered
+	CallbackSSRFBlocked = spec.CallbackSSRFBlocked
+	CallbackTimeout    = spec.CallbackTimeout
+	CallbackError      = spec.CallbackError
+	CallbackDisabled   = spec.CallbackDisabled
+)
+
+// CallbackEntry represents a single callback dispatch event in the callback log.
+type CallbackEntry = spec.CallbackEntry
+
+// CallbackPattern defines a pattern for verifying callback dispatch behavior.
+type CallbackPattern = spec.CallbackPattern
+
+// CallbackVerificationResult contains the outcome of a callback verification assertion.
+type CallbackVerificationResult = spec.CallbackVerificationResult

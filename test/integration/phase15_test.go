@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sunny809/gochaos/internal/admin"
+	"github.com/sunny809/gochaos/internal/callbacklog"
 	"github.com/sunny809/gochaos/internal/faultlog"
 	"github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
@@ -19,8 +20,9 @@ func TestPhase15_FaultLogAdminAPI(t *testing.T) {
 	registry := stub.NewRegistry()
 	requestLog := log.New(100)
 	faultLog := faultlog.NewFaultInjectionLog(100)
+	callbackLog := callbacklog.New(100)
 	engine := nearmiss.NewEngine()
-	h := admin.New(registry, requestLog, faultLog, engine, nil)
+	h := admin.New(registry, requestLog, faultLog, callbackLog, engine, nil)
 
 	// Test 1: Empty fault log
 	t.Run("empty_fault_log", func(t *testing.T) {

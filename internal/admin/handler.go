@@ -17,6 +17,8 @@
 //	DELETE /__admin/requests              Clear request log
 //	GET    /__admin/fault-log             List fault injection events
 //	DELETE /__admin/fault-log             Clear fault injection log
+//	GET    /__admin/callbacks             List callback dispatch events
+//	DELETE /__admin/callbacks             Clear callback dispatch log
 //	GET    /__admin/health                Health check (legacy)
 //	GET    /__admin/health/live           Liveness probe (K8s)
 //	GET    /__admin/health/ready          Readiness probe (K8s)
@@ -30,6 +32,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/sunny809/gochaos/internal/callbacklog"
 	"github.com/sunny809/gochaos/internal/faultlog"
 	"github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
@@ -44,6 +47,7 @@ type Handler struct {
 	registry       *stub.Registry
 	requestLog     *log.RequestLog
 	faultLog       *faultlog.FaultInjectionLog
+	callbackLog    *callbacklog.Log
 	nearMissEngine *nearmiss.Engine
 	metrics        MetricsProvider
 	resetFns       []func() // additional reset hooks (scenarios, proxy, etc.)
@@ -57,11 +61,12 @@ func (h *Handler) SetShuttingDown(v bool) {
 }
 
 // New creates an admin Handler bound to the given dependencies.
-func New(registry *stub.Registry, requestLog *log.RequestLog, faultLog *faultlog.FaultInjectionLog, nearMissEngine *nearmiss.Engine, metrics MetricsProvider) *Handler {
+func New(registry *stub.Registry, requestLog *log.RequestLog, faultLog *faultlog.FaultInjectionLog, callbackLog *callbacklog.Log, nearMissEngine *nearmiss.Engine, metrics MetricsProvider) *Handler {
 	return &Handler{
 		registry:       registry,
 		requestLog:     requestLog,
 		faultLog:       faultLog,
+		callbackLog:    callbackLog,
 		nearMissEngine: nearMissEngine,
 		metrics:        metrics,
 	}
@@ -170,6 +175,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.metrics.Add("admin_operations", 1)
 			}
 			h.clearFaultLog(w, r)
+		default:
+			methodNotAllowed(w)
+		}
+
+	case path == Prefix+"callbacks":
+		switch r.Method {
+		case http.MethodGet:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
+			h.listCallbacks(w, r)
+		case http.MethodDelete:
+			if h.metrics != nil {
+				h.metrics.Add("admin_operations", 1)
+			}
+			h.clearCallbacks(w, r)
 		default:
 			methodNotAllowed(w)
 		}

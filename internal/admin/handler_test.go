@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sunny809/gochaos/internal/callbacklog"
 	"github.com/sunny809/gochaos/internal/faultlog"
 	"github.com/sunny809/gochaos/internal/log"
 	"github.com/sunny809/gochaos/internal/nearmiss"
@@ -41,8 +42,9 @@ func setupTest() (*Handler, *stub.Registry, *log.RequestLog) {
 	registry := stub.NewRegistry()
 	requestLog := log.New(100)
 	faultLog := faultlog.NewFaultInjectionLog(100)
+	callbackLog := callbacklog.New(100)
 	engine := nearmiss.NewEngine()
-	h := New(registry, requestLog, faultLog, engine, &testMetrics{})
+	h := New(registry, requestLog, faultLog, callbackLog, engine, &testMetrics{})
 	return h, registry, requestLog
 }
 
@@ -559,5 +561,85 @@ func TestCreateMappingValidFaultType(t *testing.T) {
 	}
 	if created.Response.Fault == nil || created.Response.Fault.Type != "connection_reset" {
 		t.Errorf("expected fault type connection_reset, got %+v", created.Response.Fault)
+	}
+}
+
+func TestListCallbacks(t *testing.T) {
+	h, _, _ := setupTest()
+	h.callbackLog.Record(spec.CallbackEntry{
+		StubID:       "stub-1",
+		CallbackURL:  "http://example.com/hook",
+		Status:       spec.CallbackDelivered,
+		StatusCode:   200,
+		RequestPath:  "/api/test",
+	})
+
+	req := httptest.NewRequest("GET", "/__admin/callbacks", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var result struct {
+		Entries []spec.CallbackEntry `json:"entries"`
+		Count   int                  `json:"count"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(result.Entries))
+	}
+	if result.Count != 1 {
+		t.Errorf("expected total=1, got %d", result.Count)
+	}
+	if result.Entries[0].StubID != "stub-1" {
+		t.Errorf("expected stubID=stub-1, got %s", result.Entries[0].StubID)
+	}
+}
+
+func TestClearCallbacks(t *testing.T) {
+	h, _, _ := setupTest()
+	h.callbackLog.Record(spec.CallbackEntry{
+		StubID:      "stub-1",
+		CallbackURL: "http://example.com/hook",
+		Status:      spec.CallbackDelivered,
+	})
+
+	req := httptest.NewRequest("DELETE", "/__admin/callbacks", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if result["cleared"] != true {
+		t.Errorf("expected cleared=true, got %v", result["cleared"])
+	}
+	if result["count"] != float64(1) {
+		t.Errorf("expected count=1, got %v", result["count"])
+	}
+
+	if h.callbackLog.Len() != 0 {
+		t.Errorf("expected 0 entries after clear, got %d", h.callbackLog.Len())
+	}
+}
+
+func TestCallbacksMethodNotAllowed(t *testing.T) {
+	h, _, _ := setupTest()
+
+	req := httptest.NewRequest("POST", "/__admin/callbacks", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST on callbacks, got %d", w.Code)
 	}
 }

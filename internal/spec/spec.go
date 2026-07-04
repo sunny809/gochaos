@@ -65,6 +65,12 @@ type ResponseDefinition struct {
 	TransformResponse bool             `json:"transformResponse,omitempty" yaml:"transformResponse,omitempty"`
 	Fault             *FaultDefinition `json:"fault,omitempty" yaml:"fault,omitempty"`
 	Delay             *DelayDefinition `json:"delay,omitempty" yaml:"delay,omitempty"`
+
+	// Callback defines an optional async post-response callback to fire after
+	// the response has been written to the client. When nil, no callback is
+	// dispatched. Callbacks are fire-and-forget — they do not block the
+	// response or affect its content.
+	Callback *CallbackDefinition `json:"callback,omitempty" yaml:"callback,omitempty"`
 }
 
 // FaultDefinition describes a network-level fault to simulate.
@@ -317,4 +323,86 @@ type DimensionScore struct {
 	// Reason is a short, human-readable explanation of why this dimension
 	// did not match. It is empty when Matched is true.
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+// --- Callback ---
+
+// CallbackDefinition defines an async post-response callback to fire after the
+// mock response has been written to the client. Callbacks are fire-and-forget:
+// they do not block the response or affect its content.
+//
+// SSRF protection is enforced at dispatch time — DNS resolution is performed
+// when the callback fires (not at registration), and any resolved IP in a
+// private/reserved range causes the callback to be blocked.
+type CallbackDefinition struct {
+	// URL is the target URL for the callback HTTP request. Required.
+	URL string `json:"url" yaml:"url"`
+
+	// Method is the HTTP method for the callback request. Defaults to POST.
+	Method string `json:"method,omitempty" yaml:"method,omitempty"`
+
+	// Headers are additional headers to include in the callback request.
+	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+
+	// Body is the request body template for the callback. When non-empty, the
+	// body is rendered through text/template with the request context (method,
+	// path, headers, query params, body). When empty, no body is sent.
+	Body string `json:"body,omitempty" yaml:"body,omitempty"`
+
+	// TimeoutMs is the per-callback timeout in milliseconds. When zero or
+	// unset, defaults to the server's CallbackTimeout (default: 5000ms).
+	TimeoutMs int `json:"timeoutMs,omitempty" yaml:"timeoutMs,omitempty"`
+}
+
+// CallbackStatus describes the outcome of a callback dispatch attempt.
+type CallbackStatus string
+
+const (
+	// CallbackDelivered means the callback HTTP request completed successfully
+	// (2xx or 3xx response from the target).
+	CallbackDelivered CallbackStatus = "delivered"
+
+	// CallbackSSRFBlocked means the callback was blocked because the resolved
+	// IP address was in a private/reserved range.
+	CallbackSSRFBlocked CallbackStatus = "ssrf_blocked"
+
+	// CallbackTimeout means the callback HTTP request exceeded its timeout.
+	CallbackTimeout CallbackStatus = "timeout"
+
+	// CallbackError means the callback HTTP request failed with a network or
+	// protocol error.
+	CallbackError CallbackStatus = "error"
+
+	// CallbackDisabled means callbacks are globally disabled via the
+	// WithCallbackEnabled(false) option.
+	CallbackDisabled CallbackStatus = "disabled"
+)
+
+// CallbackEntry represents a single callback dispatch event in the callback log.
+type CallbackEntry struct {
+	StubID       string          `json:"stubId"`
+	CallbackURL  string          `json:"callbackUrl"`
+	Status       CallbackStatus  `json:"status"`
+	StatusCode   int             `json:"statusCode,omitempty"` // HTTP status from callback target (0 if not reached)
+	Error        string          `json:"error,omitempty"`
+	DispatchedAt time.Time       `json:"dispatchedAt"`
+	RequestMethod string         `json:"requestMethod"`
+	RequestPath   string         `json:"requestPath"`
+}
+
+// CallbackPattern defines a pattern for verifying callback dispatch behavior.
+type CallbackPattern struct {
+	StubID  string `json:"stubId,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Method  string `json:"method,omitempty"`
+	Status  string `json:"status,omitempty"` // CallbackStatus value
+}
+
+// CallbackVerificationResult contains the outcome of a callback verification assertion.
+type CallbackVerificationResult struct {
+	ExpectedCount int             `json:"expectedCount"`
+	ActualCount   int             `json:"actualCount"`
+	Matched       bool            `json:"matched"`
+	Errors        []string        `json:"errors,omitempty"`
+	Pattern       CallbackPattern `json:"pattern"`
 }

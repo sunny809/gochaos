@@ -69,6 +69,20 @@ type ServerConfig struct {
 	// When set (e.g. "/metrics"), GET {path} returns all metrics in Prometheus text
 	// format. It is always available under /__admin/metrics/prometheus regardless.
 	PrometheusEndpoint string
+
+	// CallbackEnabled controls whether callbacks are dispatched. When false,
+	// callback definitions on stubs are accepted but never fired — they are
+	// logged with status "disabled" instead. Default is true.
+	CallbackEnabled bool
+
+	// CallbackTimeout is the default per-callback timeout. Individual callbacks
+	// can override this via CallbackDefinition.TimeoutMs. Default is 5 seconds.
+	CallbackTimeout time.Duration
+
+	// callbackSSRFBypass skips SSRF IP-range checks on callback dispatch.
+	// This should ONLY be used in tests. It is intentionally unexported to
+	// prevent accidental production use; access it via WithCallbackSSRFBypass.
+	callbackSSRFBypass bool
 }
 
 // WithPort sets the listen port. Use 0 for a random available port.
@@ -127,6 +141,8 @@ func DefaultConfig() ServerConfig {
 		AdminPort:       0,
 		MaxRequests:     1000,
 		ShutdownTimeout: 30 * time.Second,
+		CallbackEnabled: true,
+		CallbackTimeout: 5 * time.Second,
 	}
 }
 
@@ -186,5 +202,30 @@ func WithShutdownTimeout(d time.Duration) Option {
 func WithPrometheusEndpoint(path string) Option {
 	return func(c *ServerConfig) {
 		c.PrometheusEndpoint = path
+	}
+}
+
+// WithCallbackEnabled controls whether post-response callbacks are dispatched.
+// When false, callback definitions on stubs are accepted but never fired — they
+// are logged with status "disabled" instead. Default is true.
+func WithCallbackEnabled(enabled bool) Option {
+	return func(c *ServerConfig) {
+		c.CallbackEnabled = enabled
+	}
+}
+
+// WithCallbackTimeout sets the default per-callback timeout. Individual callbacks
+// can override this via CallbackDefinition.TimeoutMs. Default is 5 seconds.
+func WithCallbackTimeout(d time.Duration) Option {
+	return func(c *ServerConfig) {
+		c.CallbackTimeout = d
+	}
+}
+
+// WithCallbackSSRFBypass disables SSRF IP-range checks on callback dispatch.
+// This should ONLY be used in tests — never in production.
+func WithCallbackSSRFBypass() Option {
+	return func(c *ServerConfig) {
+		c.callbackSSRFBypass = true
 	}
 }
