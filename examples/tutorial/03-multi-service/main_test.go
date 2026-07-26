@@ -52,8 +52,8 @@ func TestMultiServiceChaos(t *testing.T) {
 			Status: http.StatusOK,
 			Body:   `{"stock":100}`,
 			Delay: &gmock.DelayDefinition{
-				Type:    "fixed",
-				FixedMs: 2000,
+				Type:  "fixed",
+				Value: 2000,
 			},
 		},
 	})
@@ -95,7 +95,7 @@ func TestMultiServiceChaos(t *testing.T) {
 		}
 
 		// Shipping: should always be fast (no chaos)
-		resp, err := http.Get(baseURL + "/api/shipping")
+		resp, err = http.Get(baseURL + "/api/shipping")
 		if err == nil {
 			resp.Body.Close()
 		}
