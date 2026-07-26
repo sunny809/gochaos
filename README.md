@@ -1,4 +1,4 @@
-# gochaos — Fault-Burst Generator for Resilience Testing
+# gochaos — CI-gated Chaos Testing for Any Microservice
 
 > **Reproduce hours of production failures in seconds.** gochaos is a fault-burst
 > generator: a real HTTP mock server that rapidly reproduces high-failure,
@@ -23,25 +23,20 @@ as a **real HTTP server** with **fault injection**, **chaos activation modes**,
 **seedable RNG**, **near-miss diagnostics**, and a **REST admin API** — as an
 embeddable Go library and a standalone CLI/Docker image.
 
-## Installation
+## Why gmock?
 
-### CLI Binary
+### vs WireMock
+WireMock faults are always-on, so you can't assert "how many faults were injected."
+gmock faults are conditional (probabilistic / Nth-request / time-window) — so we *must* log,
+and that log becomes a CI-gateable assertion.
 
-```bash
-# Install with go install
-go install github.com/sunny809/gochaos/cmd/gmock@latest
+### vs gock / httpmock
+They intercept at `http.RoundTripper` — your SUT must use Go. gmock is a real HTTP server.
+Your SUT can be in any language, needs zero code changes.
 
-# Or download a prebuilt binary from the latest release
-# https://github.com/sunny809/gochaos/releases/latest
-```
-
-### Go Library
-
-```bash
-go get github.com/sunny809/gochaos/pkg/gmock
-```
-
-Requires Go 1.22 or newer (uses the enhanced `net/http.ServeMux` pattern matching).
+### vs Toxiproxy
+Toxiproxy works at TCP layer and needs root privileges. gmock is a 15MB Docker image,
+works at HTTP layer — `docker run` and you're done.
 
 ## Quick Start — Chaos First
 
@@ -180,6 +175,40 @@ gmock stub list --admin-url http://localhost:8080
 gmock stub create ./new-stub.json --admin-url http://localhost:8080
 gmock reset --admin-url http://localhost:8080
 ```
+
+## Installation
+
+### CLI Binary
+
+```bash
+# Install with go install
+go install github.com/sunny809/gochaos/cmd/gmock@latest
+
+# Or download a prebuilt binary from the latest release
+# https://github.com/sunny809/gochaos/releases/latest
+```
+
+### Go Library
+
+```bash
+go get github.com/sunny809/gochaos/pkg/gmock
+```
+
+Requires Go 1.22 or newer (uses the enhanced `net/http.ServeMux` pattern matching).
+
+## Key Features
+
+- **Burst-shaped faults**: Probability, Nth-request, time-window activation
+- **Reproducible**: Seedable RNG — same test run → same fault sequence
+- **Observable**: Fault-injection log with CI-gateable assertions
+- **Real HTTP server**: Not RoundTripper interception — any language SUT
+- **15MB Docker image**: No JVM, no root privileges
+
+## Architecture Highlights
+
+- ADR-004: Sharded registry over global lock (performance-first)
+- ADR-003: Matcher returns `(bool, int)` — scoring for near-miss diagnostics
+- ADR-006: `text/template` over `html/template` (JSON escaping awareness)
 
 ## Stub File Format
 
