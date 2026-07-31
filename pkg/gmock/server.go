@@ -27,6 +27,7 @@ import (
 	"github.com/sunny809/gochaos/internal/response"
 	"github.com/sunny809/gochaos/internal/spec"
 	"github.com/sunny809/gochaos/internal/stub"
+	"github.com/sunny809/gochaos/internal/timeline"
 )
 
 // Server is the public interface for a gmock server instance.
@@ -81,6 +82,17 @@ type Server interface {
 
 	// NearMiss analyzes why a request didn't match any stub.
 	NearMiss(method, path string, headers map[string]string, body string) []NearMissResult
+
+	// LoadTimelineYAML loads a fault timeline from YAML (declare or replay).
+	LoadTimelineYAML(data []byte) error
+
+	// LoadTimeline installs a fault timeline from a struct (declare or replay).
+	LoadTimeline(tl *FaultTimeline) error
+
+	// ExportTimeline returns a fault timeline artifact describing every event
+	// that fired so far (record). Triggers are request-keyed, so the artifact
+	// can be loaded into another server for deterministic replay.
+	ExportTimeline() (*FaultTimeline, error)
 }
 
 // mockServer is the concrete implementation of the Server interface.
@@ -105,6 +117,8 @@ type mockServer struct {
 	callbackDisp   *callback.Dispatcher
 	adminHandler   *admin.Handler
 	responseWriter response.Writer
+	timelineRunner *timeline.Runner
+	timelineRecord *timelineRecorder
 	globalRand     randx.RNG
 	startTime      time.Time
 	metrics        *Metrics
@@ -146,6 +160,8 @@ func NewServer(opts ...Option) Server {
 		metrics:        metrics,
 		adminHandler:   admin.New(registry, requestLog, faultLog, callbackLog, nearmiss.NewEngine(), metrics),
 		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip, globalRand),
+		timelineRunner: timeline.NewRunner(),
+		timelineRecord: newTimelineRecorder(),
 		globalRand:     globalRand,
 	}
 }
@@ -389,6 +405,8 @@ func (s *mockServer) Reset() {
 	s.requestLog.Clear()
 	s.faultLog.Clear()
 	s.callbackLog.Clear()
+	s.timelineRunner.Clear()
+	s.timelineRecord.clear()
 }
 
 // RecordedStubs returns stubs recorded from proxy mode.
@@ -467,6 +485,19 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 	// Log the request (this also captures the body for verification)
 	s.requestLog.Record(r, matched, stubID)
 
+	// Check the fault timeline (if loaded). A fired event takes precedence
+	// over the stub's own fault/delay for this request, and can even apply
+	// when no stub matched (error-type faults need no response body).
+	if fired := s.timelineRunner.Check(r, s.startTime); fired != nil {
+		s.serveTimelineFired(w, r, result, matched, stubID, fired)
+		return
+	}
+
+	// Record mode: advance the observed counter for this request. Requests
+	// consumed by a timeline event are not counted, mirroring the runner's
+	// first-match-wins semantics so replayed counters align exactly.
+	s.timelineRecord.observe(r)
+
 	if !matched {
 		s.metrics.requestsUnmatched.Add(1)
 		s.writeNoMatch(w, r)
@@ -521,6 +552,9 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 			RequestPath:    r.URL.Path,
 			ActivationMode: faultInfo.ActivationMode,
 		})
+		// Record mode: remember the stub-driven fire so ExportTimeline can
+		// serialize it into a replayable artifact.
+		s.timelineRecord.recordFire(r, result.Stub.Response.Fault)
 	}
 
 	// Dispatch async callback (fire-and-forget)
@@ -533,6 +567,55 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 			Body:        readBodyForCallback(r),
 		})
 	}
+}
+
+// serveTimelineFired writes a response for a request on which a timeline
+// event fired. The event's fault/delay replaces the stub's own; when no stub
+// matched, a default 200 stub is synthesized so the effect still applies.
+func (s *mockServer) serveTimelineFired(w http.ResponseWriter, r *http.Request, result *spec.MatchResult, matched bool, stubID string, fired *timeline.Fired) {
+	def := spec.StubDefinition{Response: spec.ResponseDefinition{Status: http.StatusOK}}
+	if matched {
+		def = *result.Stub // copy: the event overrides the stub's effects
+	}
+	def.Response.Fault = fired.Fault
+	def.Response.Delay = fired.Delay
+
+	var hitCount uint64
+	if matched {
+		hitCount = s.registry.IncrementHitCount(result.Stub.ID)
+	}
+
+	faultInfo, err := s.responseWriter.WriteResponse(w, &def, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.startTime)
+	if err != nil {
+		s.logger.Warn("failed to write timeline response", "stub", stubID, "error", err)
+	}
+
+	if def.Response.Delay != nil {
+		s.metrics.faultsDelayed.Add(1)
+	}
+	if faultInfo.Injected {
+		s.metrics.faultsInjected.Add(1)
+	}
+
+	faultType := ""
+	if fired.Fault != nil {
+		faultType = fired.Fault.Type
+	}
+	delayMs := 0
+	if fired.Delay != nil {
+		faultType = "delay"
+		delayMs = fired.Delay.Value
+	}
+	s.faultLog.Record(spec.FaultInjectionEntry{
+		StubID:         stubID,
+		FaultType:      faultType,
+		DelayMs:        delayMs,
+		ActivatedAt:    time.Now(),
+		RequestMethod:  r.Method,
+		RequestPath:    r.URL.Path,
+		ActivationMode: spec.ModeTimeline,
+		TimelineEvent:  fired.EventIndex + 1,
+	})
 }
 
 // writeRateLimited writes a rate-limit response when the token bucket is empty.

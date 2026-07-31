@@ -1,0 +1,177 @@
+package gmock
+
+import (
+	"fmt"
+	"net/http"
+	"sort"
+	"sync"
+
+	"github.com/sunny809/gochaos/internal/spec"
+	"gopkg.in/yaml.v3"
+)
+
+// LoadTimelineYAML loads a fault timeline from YAML (declare or replay).
+func (s *mockServer) LoadTimelineYAML(data []byte) error {
+	var tl FaultTimeline
+	if err := yaml.Unmarshal(data, &tl); err != nil {
+		return fmt.Errorf("gmock: invalid timeline YAML: %w", err)
+	}
+	return s.LoadTimeline(&tl)
+}
+
+// LoadTimeline installs a fault timeline from a struct (declare or replay).
+func (s *mockServer) LoadTimeline(tl *FaultTimeline) error {
+	if err := s.timelineRunner.Load(tl); err != nil {
+		return fmt.Errorf("gmock: invalid timeline: %w", err)
+	}
+	return nil
+}
+
+// ExportTimeline returns a fault timeline artifact describing every event
+// that fired so far (record). Triggers are request-keyed, so the artifact can
+// be loaded into another server for deterministic replay. The artifact
+// combines the runner's record of declared timeline events with the recorded
+// stub-driven fault fires (see timelineRecorder), so a probabilistic chaos
+// run can be exported and replayed exactly.
+func (s *mockServer) ExportTimeline() (*FaultTimeline, error) {
+	tl := s.timelineRunner.Export()
+	tl.Events = append(tl.Events, s.timelineRecord.events()...)
+	return tl, nil
+}
+
+// --- record mode: stub-driven fires ---
+
+// recordedFire is one stub-driven fault fire: the recorder counter value
+// (1-based) at which the fault fired, and the fault definition.
+type recordedFire struct {
+	at    int
+	fault *spec.FaultDefinition
+}
+
+// recordedKey is the per-(method, path) state of the recorder.
+type recordedKey struct {
+	method string
+	path   string
+	count  int // matching requests observed (mirrors the runner's counter)
+	fires  []recordedFire
+}
+
+// timelineRecorder captures stub-driven fault fires so that ExportTimeline
+// can serialize them into a replayable artifact (record mode). It mirrors
+// the timeline runner's first-match-wins counter semantics: the per-key
+// counter advances on every matching request that no timeline event
+// consumed, and fires are tagged with the counter value at fire time.
+type timelineRecorder struct {
+	mu   sync.Mutex
+	keys map[string]*recordedKey
+}
+
+func newTimelineRecorder() *timelineRecorder {
+	return &timelineRecorder{keys: make(map[string]*recordedKey)}
+}
+
+// observe advances the per-key counter for a request that was not consumed
+// by a timeline event. Called once per request, before stub matching
+// completes, mirroring the runner's counter behavior on replay.
+func (r *timelineRecorder) observe(req *http.Request) {
+	key := req.Method + "\x00" + req.URL.Path
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := r.keys[key]
+	if k == nil {
+		k = &recordedKey{method: req.Method, path: req.URL.Path}
+		r.keys[key] = k
+	}
+	k.count++
+}
+
+// recordFire records a stub-driven fault fire at the current counter value.
+func (r *timelineRecorder) recordFire(req *http.Request, fault *spec.FaultDefinition) {
+	key := req.Method + "\x00" + req.URL.Path
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := r.keys[key]
+	if k == nil {
+		k = &recordedKey{method: req.Method, path: req.URL.Path}
+		r.keys[key] = k
+	}
+	k.fires = append(k.fires, recordedFire{at: k.count, fault: fault})
+}
+
+// clear drops all observed state (used by Reset).
+func (r *timelineRecorder) clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.keys = make(map[string]*recordedKey)
+}
+
+// events synthesizes timeline events from the recorded fires. Consecutive
+// fires collapse into a single at/until window (matching the runner's export
+// convention). Triggers are adjusted for the runner's first-match-wins
+// semantics so replay is exact: each event's counter counts only the
+// matching requests it actually sees, and requests consumed by earlier
+// events' fires do not advance it, so the trigger of a window is its first
+// fire index minus the fires of all earlier windows.
+func (r *timelineRecorder) events() []TimelineEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	keys := make([]*recordedKey, 0, len(r.keys))
+	for _, k := range r.keys {
+		keys = append(keys, k)
+	}
+	// Deterministic artifact order across keys.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].method != keys[j].method {
+			return keys[i].method < keys[j].method
+		}
+		return keys[i].path < keys[j].path
+	})
+
+	var events []TimelineEvent
+	for _, k := range keys {
+		if len(k.fires) == 0 {
+			continue
+		}
+		fired := make([]int, 0, len(k.fires))
+		for _, f := range k.fires {
+			fired = append(fired, f.at)
+		}
+		sort.Ints(fired)
+
+		consumed := 0 // fires of earlier windows (each consumes one request)
+		for i := 0; i < len(fired); {
+			j := i
+			for j+1 < len(fired) && fired[j+1] == fired[j]+1 {
+				j++
+			}
+			at := fired[i] - consumed
+			var until *TimelineTrigger
+			if j > i {
+				until = &TimelineTrigger{Request: fired[j] - consumed}
+			}
+			events = append(events, TimelineEvent{
+				At:    &TimelineTrigger{Request: at},
+				Until: until,
+				Match: spec.RequestPattern{Method: k.method, URLPath: k.path},
+				Fault: deterministicFault(k.fires[i].fault),
+			})
+			consumed += j - i + 1
+			i = j + 1
+		}
+	}
+	return events
+}
+
+// deterministicFault returns a copy of the fault with its activation criteria
+// stripped. Stub-driven faults fire probabilistically; the recorded timeline
+// must replay them unconditionally (the event table decides when), so the
+// activation is dropped.
+func deterministicFault(fault *spec.FaultDefinition) *spec.FaultDefinition {
+	if fault == nil {
+		return nil
+	}
+	copy := *fault
+	copy.Activation = nil
+	return &copy
+}
