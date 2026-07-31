@@ -235,6 +235,7 @@ const (
 	ModeNthRequest  ActivationMode = "nth_request"
 	ModeTimeWindow  ActivationMode = "time_window"
 	ModeCombined    ActivationMode = "combined"
+	ModeTimeline    ActivationMode = "timeline"
 )
 
 // --- Fault Injection Log ---
@@ -247,6 +248,14 @@ type FaultInjectionEntry struct {
 	RequestMethod  string         `json:"requestMethod"`
 	RequestPath    string         `json:"requestPath"`
 	ActivationMode ActivationMode `json:"activationMode"`
+
+	// TimelineEvent is the 1-based index of the timeline event that injected
+	// this entry, or 0 when the entry was not timeline-driven.
+	TimelineEvent int `json:"timelineEvent,omitempty"`
+
+	// DelayMs is the configured delay value in milliseconds when this entry
+	// records a timeline delay injection (FaultType == "delay").
+	DelayMs int `json:"delayMs,omitempty"`
 }
 
 // --- Verification ---
@@ -380,22 +389,22 @@ const (
 
 // CallbackEntry represents a single callback dispatch event in the callback log.
 type CallbackEntry struct {
-	StubID       string          `json:"stubId"`
-	CallbackURL  string          `json:"callbackUrl"`
-	Status       CallbackStatus  `json:"status"`
-	StatusCode   int             `json:"statusCode,omitempty"` // HTTP status from callback target (0 if not reached)
-	Error        string          `json:"error,omitempty"`
-	DispatchedAt time.Time       `json:"dispatchedAt"`
+	StubID        string         `json:"stubId"`
+	CallbackURL   string         `json:"callbackUrl"`
+	Status        CallbackStatus `json:"status"`
+	StatusCode    int            `json:"statusCode,omitempty"` // HTTP status from callback target (0 if not reached)
+	Error         string         `json:"error,omitempty"`
+	DispatchedAt  time.Time      `json:"dispatchedAt"`
 	RequestMethod string         `json:"requestMethod"`
 	RequestPath   string         `json:"requestPath"`
 }
 
 // CallbackPattern defines a pattern for verifying callback dispatch behavior.
 type CallbackPattern struct {
-	StubID  string `json:"stubId,omitempty"`
-	URL     string `json:"url,omitempty"`
-	Method  string `json:"method,omitempty"`
-	Status  string `json:"status,omitempty"` // CallbackStatus value
+	StubID string `json:"stubId,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Method string `json:"method,omitempty"`
+	Status string `json:"status,omitempty"` // CallbackStatus value
 }
 
 // CallbackVerificationResult contains the outcome of a callback verification assertion.
@@ -405,4 +414,33 @@ type CallbackVerificationResult struct {
 	Matched       bool            `json:"matched"`
 	Errors        []string        `json:"errors,omitempty"`
 	Pattern       CallbackPattern `json:"pattern"`
+}
+
+// --- Fault Timeline ---
+
+// FaultTimeline is an ordered, deterministic schedule of fault/delay
+// injections (the "burst script"). It is a git-committable artifact that can
+// be declared up front, recorded from a live run, or replayed in CI.
+type FaultTimeline struct {
+	Version int             `json:"version" yaml:"version"`
+	Name    string          `json:"name,omitempty" yaml:"name,omitempty"`
+	Events  []TimelineEvent `json:"events" yaml:"events"`
+}
+
+// TimelineEvent declares one fault or delay injection on matching requests.
+// At is required and sets exactly one of Request (1-based count of matching
+// requests) or TimeMs (ms since server start). Until is optional and must use
+// the same key type as At. Fault and Delay are mutually exclusive.
+type TimelineEvent struct {
+	At    *TimelineTrigger `json:"at" yaml:"at"`
+	Until *TimelineTrigger `json:"until,omitempty" yaml:"until,omitempty"`
+	Match RequestPattern   `json:"match" yaml:"match"`
+	Fault *FaultDefinition `json:"fault,omitempty" yaml:"fault,omitempty"`
+	Delay *DelayDefinition `json:"delay,omitempty" yaml:"delay,omitempty"`
+}
+
+// TimelineTrigger keys a timeline event to a request count or an elapsed time.
+type TimelineTrigger struct {
+	Request int   `json:"request,omitempty" yaml:"request,omitempty"`
+	TimeMs  int64 `json:"timeMs,omitempty" yaml:"timeMs,omitempty"`
 }

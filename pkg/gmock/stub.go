@@ -91,6 +91,7 @@ const (
 	ModeNthRequest  = spec.ModeNthRequest
 	ModeTimeWindow  = spec.ModeTimeWindow
 	ModeCombined    = spec.ModeCombined
+	ModeTimeline    = spec.ModeTimeline
 )
 
 // FaultInjectionEntry represents a single fault injection event for logging purposes.
@@ -102,6 +103,17 @@ type FaultPattern = spec.FaultPattern
 // FaultVerificationResult contains the outcome of a fault verification assertion.
 type FaultVerificationResult = spec.FaultVerificationResult
 
+// --- Fault Timeline types ---
+
+// FaultTimeline is an ordered, deterministic schedule of fault/delay injections.
+type FaultTimeline = spec.FaultTimeline
+
+// TimelineEvent declares one fault or delay injection on matching requests.
+type TimelineEvent = spec.TimelineEvent
+
+// TimelineTrigger keys a timeline event to a request count or an elapsed time.
+type TimelineTrigger = spec.TimelineTrigger
+
 // --- Callback types ---
 
 // CallbackDefinition defines an async post-response callback.
@@ -112,11 +124,11 @@ type CallbackStatus = spec.CallbackStatus
 
 // CallbackStatus constants.
 const (
-	CallbackDelivered  = spec.CallbackDelivered
+	CallbackDelivered   = spec.CallbackDelivered
 	CallbackSSRFBlocked = spec.CallbackSSRFBlocked
-	CallbackTimeout    = spec.CallbackTimeout
-	CallbackError      = spec.CallbackError
-	CallbackDisabled   = spec.CallbackDisabled
+	CallbackTimeout     = spec.CallbackTimeout
+	CallbackError       = spec.CallbackError
+	CallbackDisabled    = spec.CallbackDisabled
 )
 
 // CallbackEntry represents a single callback dispatch event in the callback log.
