@@ -495,8 +495,12 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 
 	// Record mode: advance the observed counter for this request. Requests
 	// consumed by a timeline event are not counted, mirroring the runner's
-	// first-match-wins semantics so replayed counters align exactly.
-	s.timelineRecord.observe(r)
+	// first-match-wins semantics so replayed counters align exactly. The
+	// returned position is passed to recordFire once the response has been
+	// written, so the fire is tagged with this request's exact observed
+	// position even when other requests observe concurrently during the
+	// stub's delay.
+	at := s.timelineRecord.observe(r)
 
 	if !matched {
 		s.metrics.requestsUnmatched.Add(1)
@@ -553,8 +557,10 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 			ActivationMode: faultInfo.ActivationMode,
 		})
 		// Record mode: remember the stub-driven fire so ExportTimeline can
-		// serialize it into a replayable artifact.
-		s.timelineRecord.recordFire(r, result.Stub.Response.Fault)
+		// serialize it into a replayable artifact. The fire is tagged with
+		// the position observe returned for this request (not a counter read
+		// now), preserving exactness under concurrent requests.
+		s.timelineRecord.recordFire(r, result.Stub.Response.Fault, at)
 	}
 
 	// Dispatch async callback (fire-and-forget)

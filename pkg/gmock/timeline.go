@@ -71,9 +71,14 @@ func newTimelineRecorder() *timelineRecorder {
 }
 
 // observe advances the per-key counter for a request that was not consumed
-// by a timeline event. Called once per request, before stub matching
-// completes, mirroring the runner's counter behavior on replay.
-func (r *timelineRecorder) observe(req *http.Request) {
+// by a timeline event and returns the request's position in the observed
+// order (the post-increment counter value). Called once per request, before
+// stub matching completes, mirroring the runner's counter behavior on
+// replay. The returned position must be passed to recordFire for the same
+// request: observe and recordFire are separated by WriteResponse, which
+// applies the stub's delay first, so reading the counter at recordFire time
+// could tag the fire with a later request's position under concurrency.
+func (r *timelineRecorder) observe(req *http.Request) int {
 	key := req.Method + "\x00" + req.URL.Path
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -83,19 +88,26 @@ func (r *timelineRecorder) observe(req *http.Request) {
 		r.keys[key] = k
 	}
 	k.count++
+	return k.count
 }
 
-// recordFire records a stub-driven fault fire at the current counter value.
-func (r *timelineRecorder) recordFire(req *http.Request, fault *spec.FaultDefinition) {
+// recordFire records a stub-driven fault fire at the request's observed
+// position: the value observe returned for that request. The position is
+// passed in because the fire is recorded after the response — and its
+// delay — has been written, by which time the counter may have advanced
+// past this request under concurrency.
+func (r *timelineRecorder) recordFire(req *http.Request, fault *spec.FaultDefinition, at int) {
 	key := req.Method + "\x00" + req.URL.Path
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := r.keys[key]
 	if k == nil {
+		// A fire without a prior observe (e.g. recorder state cleared
+		// between observe and recordFire) must still be recorded.
 		k = &recordedKey{method: req.Method, path: req.URL.Path}
 		r.keys[key] = k
 	}
-	k.fires = append(k.fires, recordedFire{at: k.count, fault: fault})
+	k.fires = append(k.fires, recordedFire{at: at, fault: fault})
 }
 
 // clear drops all observed state (used by Reset).
