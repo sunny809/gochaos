@@ -175,8 +175,9 @@ func TestCheckNonMatchingRequestDoesNotAdvanceCounter(t *testing.T) {
 	}
 }
 
-// TestCheckFirstEventWins applies only the first fired event per request,
-// but advances every matching event's counter.
+// TestCheckFirstEventWins applies only the first fired event per request:
+// the scan stops at the first fire, so event 1 does not observe request 1
+// and fires on the next matching request instead.
 func TestCheckFirstEventWins(t *testing.T) {
 	r := NewRunner()
 	tl := &spec.FaultTimeline{
@@ -195,8 +196,9 @@ func TestCheckFirstEventWins(t *testing.T) {
 	if f == nil || f.EventIndex != 0 {
 		t.Fatalf("expected first event to win, got %+v", f)
 	}
-	// Event 0 is exhausted; event 1's counter was still advanced, so its
-	// request 1 fires now.
+	// Event 0 is exhausted. The scan stopped at event 0's fire, so event 1
+	// did not see request 1; request 2 is its first matching request and the
+	// single-shot trigger (At.Request: 1) fires then.
 	f = r.Check(newRequest(t, "/api/z"), start)
 	if f == nil || f.EventIndex != 1 {
 		t.Fatalf("expected second event to fire next, got %+v", f)

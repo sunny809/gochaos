@@ -103,6 +103,7 @@ func (r *Runner) Check(req *http.Request, serverStart time.Time) *Fired {
 		}
 		e.counter++
 		if e.shouldFire(elapsedMs) {
+			e.fired = append(e.fired, e.counter)
 			return &Fired{
 				EventIndex:   i,
 				RequestCount: e.counter,
