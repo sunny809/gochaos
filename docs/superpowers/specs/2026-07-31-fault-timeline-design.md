@@ -51,15 +51,15 @@ events:
   # Trigger: exactly one of request / timeMs. Until is optional, same key type.
   - at: { request: 3 }            # 3rd request matching `match`
     until: { request: 5 }         # fires for requests 3..5, then expires
-    match: { method: POST, path: /api/payments }   # reuses RequestPattern
+    match: { method: POST, urlPath: /api/payments }   # reuses RequestPattern
     fault: { type: error }        # reuses FaultDefinition
   - at: { timeMs: 5000 }          # or: 5s after server start
     until: { timeMs: 15000 }
-    match: { path: /api/inventory }
+    match: { urlPath: /api/inventory }
     delay: { type: fixed, value: 2000 }             # reuses DelayDefinition
   - at: { request: 7 }
-    match: { path: /api/payments }
-    fault: { type: reset }
+    match: { urlPath: /api/payments }
+    fault: { type: connection_reset }
 ```
 
 **Semantics**
@@ -106,10 +106,15 @@ request → matching engine (stub match unchanged)
 
 ## 4. Record & replay
 
-**Record.** `server.ExportTimeline()` emits the runner's fired-events record as
-a timeline artifact. Triggers are written as `request: N` (counter value at
-fire time), so any recorded timeline is replayable. Consecutive fires of one
-event collapse into a single `at`/`until` window.
+**Record.** `server.ExportTimeline()` combines the runner's fired-events record
+with the recorded **stub-driven fault fires** (see `timelineRecorder`), so a
+probabilistic chaos run — whose faults fire through resident stubs — exports
+exactly what the client actually experienced. Triggers are written as
+`request: N` (counter value at fire time), so any recorded timeline is
+replayable. Consecutive fires of one event collapse into a single
+`at`/`until` window. Recorded stub-driven faults have their `activation`
+stripped: the event table decides when they fire on replay, so they replay
+unconditionally.
 
 Workflow: run probabilistic chaos locally (several seeds), pick a real fault
 sequence worth asserting, `ExportTimeline`, commit the YAML. The committed
@@ -126,7 +131,10 @@ timeline is therefore immune to RNG sequence changes between gochaos versions.
 
 **Separation of concerns.**
 
-- `ExportTimeline` ← runner's fired-events record (timeline-injected only).
+- `ExportTimeline` ← runner's fired-events record **plus** recorded stub-driven
+  fires. Record mode captures stub-driven fires too (the recorder mirrors the
+  runner's per-key counters and adjusts for first-match-wins), so probabilistic
+  chaos runs export exactly and replay deterministically.
 - `GET /__admin/report` ← `FaultInjectionLog` (all injections: stub faults +
   timeline events).
 
@@ -160,11 +168,13 @@ func (s *Server) ExportTimeline() (*FaultTimeline, error)
 **Admin endpoint** (internal/admin):
 
 - `GET /__admin/report?format=junit|json` — snapshot of the fault log.
-  - *JUnit XML:* one `<testsuite>`; each stub/event gets `<testcase>`s; injection
-    counts surface in `<failure>` attrs — chaos evidence renders as a test
+  - *JUnit XML:* one `<testsuite>`; each injection becomes a failing
+    `<testcase>` (name: fault type or `delay`; classname: stub ID; failure
+    message: request line + timestamp) — chaos evidence renders as a test
     suite in CI dashboards.
-  - *JSON:* structured export (event, timestamp, global ordinal, activation
-    mode) for scripts.
+  - *JSON:* structured export (suite name + entries: stubId, faultType,
+    activatedAt, requestMethod, requestPath, activationMode, timelineEvent,
+    delayMs) for scripts.
 
 **CLI** (thin shell):
 
@@ -176,7 +186,7 @@ func (s *Server) ExportTimeline() (*FaultTimeline, error)
 |-------|--------|
 | `internal/spec/` | `FaultTimeline`, `TimelineEvent`, `TimelineTrigger` types + validation |
 | `internal/timeline/` (new) | runner: event sort, trigger checks (index/time), counters, fired-events record, export assembly — imports `internal/spec` only |
-| `internal/log/` | fault-log entry gains optional timeline ref (event ordinal + counter value) |
+| `internal/log/` | fault-log entry gains optional timeline ref (event ordinal) |
 | `internal/stub/` | unchanged (matching engine reused) |
 | `internal/report/` (new) | JUnit XML / JSON serializers over the fault log |
 | `internal/admin/` | `GET /__admin/report` handler |

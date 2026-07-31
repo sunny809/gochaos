@@ -346,8 +346,9 @@ func TestCheckFirstEventWins(t *testing.T) {
 	if f == nil || f.EventIndex != 0 {
 		t.Fatalf("expected first event to win, got %+v", f)
 	}
-	// Event 0 is exhausted; event 1's counter was still advanced, so its
-	// request 1 fires now.
+	// Event 0 is exhausted. Event 1 did not see request 1 (the scan stopped
+	// at event 0's fire), so request 2 is its first matching request and its
+	// single-shot trigger at request 1 fires now.
 	f = r.Check(newRequest(t, "/api/z"), start)
 	if f == nil || f.EventIndex != 1 {
 		t.Fatalf("expected second event to fire next, got %+v", f)
@@ -478,16 +479,17 @@ func (r *Runner) Clear() {
 }
 
 // Check evaluates the timeline for one request and returns the first fired
-// event in declaration order, or nil when no event fires. Every event whose
-// pattern matches advances its own counter independently, even when an
-// earlier event already fired for this request.
+// event in declaration order, or nil when no event fires. First-match-wins:
+// the request is consumed by the first event whose trigger fires, and later
+// events do not see it — so every event that fires always applies its effect
+// (no silent consumption of a single-shot trigger). Each event's counter
+// counts only the matching requests it actually sees.
 func (r *Runner) Check(req *http.Request, serverStart time.Time) *Fired {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	elapsedMs := time.Since(serverStart).Milliseconds()
 
-	var first *Fired
 	for i, e := range r.events {
 		if e.exhausted {
 			continue
@@ -498,17 +500,16 @@ func (r *Runner) Check(req *http.Request, serverStart time.Time) *Fired {
 		}
 		e.counter++
 		if e.shouldFire(elapsedMs) {
-			if first == nil {
-				first = &Fired{
-					EventIndex:   i,
-					RequestCount: e.counter,
-					Fault:        e.def.Fault,
-					Delay:        e.def.Delay,
-				}
+			e.fired = append(e.fired, e.counter)
+			return &Fired{
+				EventIndex:   i,
+				RequestCount: e.counter,
+				Fault:        e.def.Fault,
+				Delay:        e.def.Delay,
 			}
 		}
 	}
-	return first
+	return nil
 }
 
 // shouldFire decides whether the event fires at its current counter/elapsed
@@ -1015,6 +1016,33 @@ Expected: FAIL — compile error (`LoadTimelineYAML` etc. undefined).
 
 - [ ] **Step 4: Implement the public API**
 
+> **Adjudicated 2026-07-31 (user-approved):** The brief's verbatim `ExportTimeline`
+> (returning only `s.timelineRunner.Export()`) contradicts the brief's own
+> `TestTimelineExportReplayClosedLoop` and spec §4's workflow ("run probabilistic
+> chaos locally … `ExportTimeline`, commit the YAML"): probabilistic chaos runs
+> with *no timeline loaded*, so the runner's record is empty. Record mode must
+> therefore capture **stub-driven fault fires** too. The accepted design adds a
+> `timelineRecorder` to `mockServer` (in `pkg/gmock/timeline.go`):
+>
+> - `observe(req)` advances a per-(method, path) counter for every request NOT
+>   consumed by a timeline event (called in `serveMock` after the timeline
+>   `Check` block, before the 404 branch — unmatched requests count, exactly as
+>   they will on replay).
+> - `recordFire(req, fault)` is called in `serveMock` when `faultInfo.Injected`
+>   is true; the stub's fault is tagged with the current counter value.
+> - `ExportTimeline` appends `timelineRecorder.events()` to `runner.Export()`.
+>   Synthesized events: `at/until` request-keyed from the fire counters,
+>   consecutive fires collapsed into one window, `Match` from the recorded
+>   (method, path), and `Fault` copied with `Activation: nil` stripped
+>   (`deterministicFault`) so replay fires unconditionally instead of re-rolling
+>   the RNG.
+> - **First-match-wins adjustment:** the runner stops scanning at the first
+>   fired event, so each earlier window's fires consume one request each that a
+>   later event does not see. A window's exported `at` is therefore
+>   `fired[i] - consumed` where `consumed` = fires of all earlier windows for
+>   that key.
+> - `Reset` clears the recorder.
+
 Create `pkg/gmock/timeline.go`:
 
 ```go
@@ -1022,7 +1050,11 @@ package gmock
 
 import (
 	"fmt"
+	"net/http"
+	"sort"
+	"sync"
 
+	"github.com/sunny809/gochaos/internal/spec"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1045,9 +1077,151 @@ func (s *mockServer) LoadTimeline(tl *FaultTimeline) error {
 
 // ExportTimeline returns a fault timeline artifact describing every event
 // that fired so far (record). Triggers are request-keyed, so the artifact can
-// be loaded into another server for deterministic replay.
+// be loaded into another server for deterministic replay. The artifact
+// combines the runner's record of declared timeline events with the recorded
+// stub-driven fault fires (see timelineRecorder), so a probabilistic chaos
+// run can be exported and replayed exactly.
 func (s *mockServer) ExportTimeline() (*FaultTimeline, error) {
-	return s.timelineRunner.Export(), nil
+	tl := s.timelineRunner.Export()
+	tl.Events = append(tl.Events, s.timelineRecord.events()...)
+	return tl, nil
+}
+
+// --- record mode: stub-driven fires ---
+
+// recordedFire is one stub-driven fault fire: the recorder counter value
+// (1-based) at which the fault fired, and the fault definition.
+type recordedFire struct {
+	at    int
+	fault *spec.FaultDefinition
+}
+
+// recordedKey is the per-(method, path) state of the recorder.
+type recordedKey struct {
+	method string
+	path   string
+	count  int // matching requests observed (mirrors the runner's counter)
+	fires  []recordedFire
+}
+
+// timelineRecorder captures stub-driven fault fires so that ExportTimeline
+// can serialize them into a replayable artifact (record mode). It mirrors
+// the timeline runner's first-match-wins counter semantics: the per-key
+// counter advances on every matching request that no timeline event
+// consumed, and fires are tagged with the counter value at fire time.
+type timelineRecorder struct {
+	mu   sync.Mutex
+	keys map[string]*recordedKey
+}
+
+func newTimelineRecorder() *timelineRecorder {
+	return &timelineRecorder{keys: make(map[string]*recordedKey)}
+}
+
+// observe advances the per-key counter for a request that was not consumed
+// by a timeline event. Called once per request, before stub matching
+// completes, mirroring the runner's counter behavior on replay.
+func (r *timelineRecorder) observe(req *http.Request) {
+	key := req.Method + "\x00" + req.URL.Path
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := r.keys[key]
+	if k == nil {
+		k = &recordedKey{method: req.Method, path: req.URL.Path}
+		r.keys[key] = k
+	}
+	k.count++
+}
+
+// recordFire records a stub-driven fault fire at the current counter value.
+func (r *timelineRecorder) recordFire(req *http.Request, fault *spec.FaultDefinition) {
+	key := req.Method + "\x00" + req.URL.Path
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := r.keys[key]
+	if k == nil {
+		k = &recordedKey{method: req.Method, path: req.URL.Path}
+		r.keys[key] = k
+	}
+	k.fires = append(k.fires, recordedFire{at: k.count, fault: fault})
+}
+
+// clear drops all observed state (used by Reset).
+func (r *timelineRecorder) clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.keys = make(map[string]*recordedKey)
+}
+
+// events synthesizes timeline events from the recorded fires. Consecutive
+// fires collapse into a single at/until window (matching the runner's export
+// convention). Triggers are adjusted for the runner's first-match-wins
+// semantics so replay is exact: each event's counter counts only the
+// matching requests it actually sees, and requests consumed by earlier
+// events' fires do not advance it, so the trigger of a window is its first
+// fire index minus the fires of all earlier windows.
+func (r *timelineRecorder) events() []TimelineEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	keys := make([]*recordedKey, 0, len(r.keys))
+	for _, k := range r.keys {
+		keys = append(keys, k)
+	}
+	// Deterministic artifact order across keys.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].method != keys[j].method {
+			return keys[i].method < keys[j].method
+		}
+		return keys[i].path < keys[j].path
+	})
+
+	var events []TimelineEvent
+	for _, k := range keys {
+		if len(k.fires) == 0 {
+			continue
+		}
+		fired := make([]int, 0, len(k.fires))
+		for _, f := range k.fires {
+			fired = append(fired, f.at)
+		}
+		sort.Ints(fired)
+
+		consumed := 0 // fires of earlier windows (each consumes one request)
+		for i := 0; i < len(fired); {
+			j := i
+			for j+1 < len(fired) && fired[j+1] == fired[j]+1 {
+				j++
+			}
+			at := fired[i] - consumed
+			var until *TimelineTrigger
+			if j > i {
+				until = &TimelineTrigger{Request: fired[j] - consumed}
+			}
+			events = append(events, TimelineEvent{
+				At:    &TimelineTrigger{Request: at},
+				Until: until,
+				Match: spec.RequestPattern{Method: k.method, URLPath: k.path},
+				Fault: deterministicFault(k.fires[i].fault),
+			})
+			consumed += j - i + 1
+			i = j + 1
+		}
+	}
+	return events
+}
+
+// deterministicFault returns a copy of the fault with its activation criteria
+// stripped. Stub-driven faults fire probabilistically; the recorded timeline
+// must replay them unconditionally (the event table decides when), so the
+// activation is dropped.
+func deterministicFault(fault *spec.FaultDefinition) *spec.FaultDefinition {
+	if fault == nil {
+		return nil
+	}
+	copy := *fault
+	copy.Activation = nil
+	return &copy
 }
 ```
 
@@ -1063,6 +1237,19 @@ In `pkg/gmock/server.go`, `serveMock`, insert after the `requestLog.Record` line
 		s.serveTimelineFired(w, r, result, matched, stubID, fired)
 		return
 	}
+
+	// Record mode: advance the observed counter for this request. Requests
+	// consumed by a timeline event are not counted, mirroring the runner's
+	// first-match-wins semantics so replayed counters align exactly.
+	s.timelineRecord.observe(r)
+```
+
+And in the stub-fault-injected branch (where the fault log entry is recorded), add:
+
+```go
+		// Record mode: remember the stub-driven fire so ExportTimeline can
+		// serialize it into a replayable artifact.
+		s.timelineRecord.recordFire(r, result.Stub.Response.Fault)
 ```
 
 Append `serveTimelineFired` at the end of `pkg/gmock/server.go`:
@@ -1232,6 +1419,18 @@ func TestJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestJSONEmpty renders an empty entries array (never null) — script
+// consumers do `.entries[]` and must see an array.
+func TestJSONEmpty(t *testing.T) {
+	out, err := JSON(nil, "gmock-chaos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"entries": []`) {
+		t.Fatalf("expected empty entries array, got:\n%s", string(out))
+	}
+}
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1318,8 +1517,13 @@ type JSONReport struct {
 	Entries []spec.FaultInjectionEntry `json:"entries"`
 }
 
-// JSON renders the fault injection log as a JSON report envelope.
+// JSON renders the fault injection log as a JSON report envelope. An empty
+// log renders as an empty entries array (never null), so script consumers
+// can always do `.entries[]`.
 func JSON(entries []spec.FaultInjectionEntry, suiteName string) ([]byte, error) {
+	if entries == nil {
+		entries = []spec.FaultInjectionEntry{}
+	}
 	return json.MarshalIndent(JSONReport{Suite: suiteName, Entries: entries}, "", "  ")
 }
 ```

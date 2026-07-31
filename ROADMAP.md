@@ -109,6 +109,7 @@ Features that expand reach but are **not required for v1.0 MVP**.
 | B1-B3 | OpenAPI Import | ~7h | Users can hand-write YAML; generator is nice-to-have |
 | C1 | Async callback/webhook | ~3h | Low usage frequency; implementation complex (SSRF, lifecycle) |
 | W1-W4 | WireMock API compatibility | ~2.5h | Migration users are niche; ROI low |
+| T1-T3 | Fault Timeline (declare/record/replay) + chaos report | ~1 week | Recorded timelines stay CI-stable across RNG changes (spec 2026-07-31) |
 | G2-G5 | GitHub Professionalization | ~1h | Non-functional polish |
 
 ---
