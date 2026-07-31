@@ -595,6 +595,27 @@ func (s *mockServer) serveTimelineFired(w http.ResponseWriter, r *http.Request, 
 		hitCount = s.registry.IncrementHitCount(result.Stub.ID)
 	}
 
+	// rate_limit events fire unconditionally on the timeline path: the event
+	// table already decided when the injection applies, so the token bucket is
+	// not consulted. WriteResponse treats rate_limit as a no-op (applyFault
+	// short-circuits at the serveMock layer), so the 429 is written here —
+	// mirroring the serveMock A10 branch. The event's delay does not apply
+	// (fault and delay are mutually exclusive), so returning early is safe.
+	if fired.Fault != nil && fired.Fault.Type == "rate_limit" {
+		s.writeRateLimited(w, r, fired.Fault)
+		s.metrics.faultsInjected.Add(1)
+		s.faultLog.Record(spec.FaultInjectionEntry{
+			StubID:         stubID,
+			FaultType:      "rate_limit",
+			ActivatedAt:    time.Now(),
+			RequestMethod:  r.Method,
+			RequestPath:    r.URL.Path,
+			ActivationMode: spec.ModeTimeline,
+			TimelineEvent:  fired.EventIndex + 1,
+		})
+		return
+	}
+
 	faultInfo, err := s.responseWriter.WriteResponse(w, &def, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.startTime)
 	if err != nil {
 		s.logger.Warn("failed to write timeline response", "stub", stubID, "error", err)

@@ -175,6 +175,140 @@ func TestTimelineRateLimitRecorded(t *testing.T) {
 	}
 }
 
+// TestTimelineRateLimitReplayReproduces429s: a recorded rate_limit burst
+// replays as actual 429s on a fresh server. Pins the serveTimelineFired
+// rate_limit branch (WriteResponse alone treats rate_limit as a no-op), so
+// the artifact reproduces the 429s the client experienced, not normal
+// responses. The replay server has no rate_limit stub — the 429s come from
+// the loaded timeline event, not a token bucket.
+func TestTimelineRateLimitReplayReproduces429s(t *testing.T) {
+	const n = 8
+
+	drive := func(server gmock.Server) []int {
+		statuses := make([]int, 0, n)
+		for i := 0; i < n; i++ {
+			resp, err := http.Get(server.URL() + "/api/burst")
+			if err != nil {
+				t.Fatalf("request %d: %v", i, err)
+			}
+			resp.Body.Close()
+			statuses = append(statuses, resp.StatusCode)
+		}
+		return statuses
+	}
+
+	// Run 1: record. Tight loop so the token bucket cannot refill between
+	// requests: 1-2 warm-up, 3-4 consume the initial tokens, 5+ are limited.
+	serverA, stopA := startServer(t)
+	serverA.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/burst"},
+		Response: gmock.ResponseDefinition{
+			Status: http.StatusOK,
+			Body:   `{"ok":true}`,
+			Fault: &gmock.FaultDefinition{
+				Type:          "rate_limit",
+				AfterRequests: 2,
+				PerSecond:     2,
+			},
+		},
+	})
+	gotA := drive(serverA)
+	limited := 0
+	for _, s := range gotA {
+		if s == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited == 0 {
+		stopA()
+		t.Fatal("run A: expected at least one rate-limited request")
+	}
+
+	tl, err := serverA.ExportTimeline()
+	if err != nil {
+		stopA()
+		t.Fatalf("export: %v", err)
+	}
+	if len(tl.Events) == 0 {
+		stopA()
+		t.Fatal("expected exported timeline to contain fired events")
+	}
+	data, err := yaml.Marshal(tl)
+	if err != nil {
+		stopA()
+		t.Fatalf("marshal: %v", err)
+	}
+	stopA()
+
+	// Run 2: replay the artifact into a fresh, fault-free server. The 429s
+	// must come from the timeline events only.
+	serverB, stopB := startServer(t)
+	defer stopB()
+	serverB.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/burst"},
+		Response: gmock.ResponseDefinition{
+			Status: http.StatusOK,
+			Body:   `{"ok":true}`,
+		},
+	})
+	if err := serverB.LoadTimelineYAML(data); err != nil {
+		t.Fatalf("replay load: %v", err)
+	}
+	gotB := drive(serverB)
+
+	for i := range gotA {
+		if gotA[i] != gotB[i] {
+			t.Fatalf("request %d: run A=%d run B=%d (sequences differ)", i, gotA[i], gotB[i])
+		}
+	}
+}
+
+// TestTimelineRateLimitDeclaredFires: a declared timeline event with a
+// rate_limit fault produces an actual 429 (not the normal response) and
+// lands in the fault log as a timeline injection. Pins the declare path,
+// which previously went through the rate_limit no-op in WriteResponse.
+func TestTimelineRateLimitDeclaredFires(t *testing.T) {
+	server, stop := startServer(t)
+	defer stop()
+
+	server.Stub(gmock.StubDefinition{
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/declared"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK, Body: `{"ok":true}`},
+	})
+
+	if err := server.LoadTimelineYAML([]byte(`
+version: 1
+events:
+  - at: { request: 1 }
+    match: { method: GET, urlPath: /api/declared }
+    fault: { type: rate_limit }
+`)); err != nil {
+		t.Fatalf("load timeline: %v", err)
+	}
+
+	// Request 1 fires the event -> 429; request 2 is past the single-shot
+	// event -> normal 200.
+	want := []int{http.StatusTooManyRequests, http.StatusOK}
+	for i, wantStatus := range want {
+		resp, err := http.Get(server.URL() + "/api/declared")
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != wantStatus {
+			t.Fatalf("request %d: got status %d, want %d", i, resp.StatusCode, wantStatus)
+		}
+	}
+
+	result := server.VerifyFaultsInjected(gmock.FaultPattern{
+		FaultType:      "rate_limit",
+		ActivationMode: "timeline",
+	}, 1)
+	if !result.Matched {
+		t.Fatalf("expected 1 timeline rate_limit fault: %v", result.Errors)
+	}
+}
+
 // TestTimelineYAMLRoundTrip: an exported artifact, marshaled to YAML and
 // loaded into a fresh server via LoadTimelineYAML, replays the identical
 // injection sequence. Pins the marshal -> LoadTimelineYAML path that only
