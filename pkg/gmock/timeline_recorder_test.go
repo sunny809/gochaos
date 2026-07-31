@@ -102,8 +102,7 @@ func TestTimelineRecorder_Events_Windows(t *testing.T) {
 // TestTimelineRecorder_RecordFireUsesPassedPosition checks the recordFire
 // contract: the fire is tagged with the passed position even when the
 // counter has advanced past it (the buggy behavior read the counter at
-// record time), and a fire without a prior observe still creates the key
-// entry.
+// record time).
 func TestTimelineRecorder_RecordFireUsesPassedPosition(t *testing.T) {
 	rec := newTimelineRecorder()
 	req := recorderRequest(http.MethodGet, "/x")
@@ -115,19 +114,60 @@ func TestTimelineRecorder_RecordFireUsesPassedPosition(t *testing.T) {
 	rec.observe(req)
 	rec.recordFire(req, testFault(), 2)
 
-	// A fire on a fresh key with no prior observe must still record.
-	fresh := recorderRequest(http.MethodGet, "/z")
-	rec.recordFire(fresh, testFault(), 1)
-
 	events := rec.events()
-	if len(events) != 2 {
-		t.Fatalf("events: got %d, want 2", len(events))
+	if len(events) != 1 {
+		t.Fatalf("events: got %d, want 1", len(events))
 	}
 	if events[0].At == nil || events[0].At.Request != 2 {
 		t.Fatalf("events[0].At: got %+v, want request 2 (the passed position, not the counter 3)", events[0].At)
 	}
-	if events[1].At == nil || events[1].At.Request != 1 {
-		t.Fatalf("events[1].At: got %+v, want request 1 (fire without prior observe)", events[1].At)
+}
+
+// TestTimelineRecorder_DropFireWithoutObserve: recordFire on a key with no
+// prior observe is dropped. This happens when the recorder was cleared
+// (Reset) between observe and recordFire — the observed position belongs to
+// the previous epoch, and recording it would put a phantom event at a stale
+// position in the new epoch's export.
+func TestTimelineRecorder_DropFireWithoutObserve(t *testing.T) {
+	rec := newTimelineRecorder()
+	rec.recordFire(recorderRequest(http.MethodGet, "/z"), testFault(), 1)
+
+	if events := rec.events(); len(events) != 0 {
+		t.Fatalf("events: got %d, want 0 (fire without prior observe dropped)", len(events))
+	}
+}
+
+// TestTimelineRecorder_Events_SortsByObservedPosition: fires are recorded in
+// completion order, which can differ from observe order when stubs delay
+// responses under concurrency. events() must sort by position so each window
+// carries the fault of the fire at its actual observed position.
+func TestTimelineRecorder_Events_SortsByObservedPosition(t *testing.T) {
+	rec := newTimelineRecorder()
+	req := recorderRequest(http.MethodGet, "/x")
+
+	// Four requests observe; the fires are then recorded in reverse order,
+	// as if the later requests completed first. Each fire carries a distinct
+	// fault type so misattribution is detectable.
+	for i := 0; i < 4; i++ {
+		rec.observe(req)
+	}
+	rec.recordFire(req, &spec.FaultDefinition{Type: "error"}, 4)
+	rec.recordFire(req, &spec.FaultDefinition{Type: "empty"}, 2)
+	rec.recordFire(req, &spec.FaultDefinition{Type: "malformed"}, 3)
+
+	events := rec.events()
+	if len(events) != 1 {
+		t.Fatalf("events: got %d, want 1 (fires at 2,3,4 collapse)", len(events))
+	}
+	ev := events[0]
+	if ev.At == nil || ev.At.Request != 2 {
+		t.Fatalf("events[0].At: got %+v, want request 2 (the earliest observed fire)", ev.At)
+	}
+	if ev.Until == nil || ev.Until.Request != 4 {
+		t.Fatalf("events[0].Until: got %+v, want request 4", ev.Until)
+	}
+	if ev.Fault == nil || ev.Fault.Type != "empty" {
+		t.Fatalf("events[0].Fault: got %+v, want the fault of the fire at position 2", ev.Fault)
 	}
 }
 

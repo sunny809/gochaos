@@ -225,7 +225,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		h.metricsHandler(w, r)
 
-	case path == Prefix+"report":
+	case path == Prefix+"report" || path == Prefix+"report/":
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
 			return

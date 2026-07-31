@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PaesslerAG/jsonpath"
@@ -120,8 +121,16 @@ type mockServer struct {
 	timelineRunner *timeline.Runner
 	timelineRecord *timelineRecorder
 	globalRand     randx.RNG
-	startTime      time.Time
+	startTimeNanos atomic.Int64 // epoch anchor (UnixNano) for time-keyed activation
 	metrics        *Metrics
+}
+
+// serverStartTime returns the epoch anchor for time-keyed activation (fault
+// activation windows and timeline time triggers). Reset re-bases it so a
+// re-run evaluates from scratch, like the counters. Atomic because Reset can
+// run concurrently with in-flight requests.
+func (s *mockServer) serverStartTime() time.Time {
+	return time.Unix(0, s.startTimeNanos.Load())
 }
 
 // NewServer creates a new gmock server with the given options.
@@ -147,7 +156,9 @@ func NewServer(opts ...Option) Server {
 	callbackDisp := callback.NewDispatcher(logger, callbackLog, cfg.CallbackTimeout, cfg.CallbackEnabled)
 	callbackDisp.SetSSRFBypass(cfg.callbackSSRFBypass)
 
-	return &mockServer{
+	adminHandler := admin.New(registry, requestLog, faultLog, callbackLog, nearmiss.NewEngine(), metrics)
+
+	s := &mockServer{
 		config:         cfg,
 		logger:         logger,
 		registry:       registry,
@@ -158,12 +169,21 @@ func NewServer(opts ...Option) Server {
 		callbackLog:    callbackLog,
 		callbackDisp:   callbackDisp,
 		metrics:        metrics,
-		adminHandler:   admin.New(registry, requestLog, faultLog, callbackLog, nearmiss.NewEngine(), metrics),
+		adminHandler:   adminHandler,
 		responseWriter: response.NewHTTPWriter(logger, cfg.DisableGzip, globalRand),
 		timelineRunner: timeline.NewRunner(),
 		timelineRecord: newTimelineRecorder(),
 		globalRand:     globalRand,
 	}
+
+	// Admin reset mirrors Server.Reset for the timeline: counters re-arm,
+	// recorded fires are dropped, and time-keyed triggers re-baseline.
+	adminHandler.RegisterResetHook(func() {
+		s.timelineRunner.Clear()
+		s.timelineRecord.clear()
+		s.startTimeNanos.Store(time.Now().UnixNano())
+	})
+	return s
 }
 
 // Start launches the HTTP server.
@@ -186,7 +206,7 @@ func (s *mockServer) Start() error {
 	// This is set after the listener is bound so that time-window
 	// calculations are relative to when the server actually started
 	// serving traffic.
-	s.startTime = time.Now()
+	s.startTimeNanos.Store(time.Now().UnixNano())
 
 	// Determine if admin runs on a separate port
 	useSeparateAdminPort := s.config.AdminPort > 0
@@ -398,7 +418,10 @@ func (s *mockServer) ClearStubs() {
 	s.registry.DeleteAll()
 }
 
-// Reset clears all stubs, request log, fault log, callback log, and resets all metrics.
+// Reset clears all stubs, request log, fault log, callback log, timeline
+// state, and all metrics. The time-keyed epoch re-baselines to the reset
+// moment, so a re-run evaluates its timeline (and activation windows) from
+// scratch — time triggers are not permanently dead after reset.
 func (s *mockServer) Reset() {
 	s.metrics.resetAll()
 	s.registry.DeleteAll()
@@ -407,6 +430,7 @@ func (s *mockServer) Reset() {
 	s.callbackLog.Clear()
 	s.timelineRunner.Clear()
 	s.timelineRecord.clear()
+	s.startTimeNanos.Store(time.Now().UnixNano())
 }
 
 // RecordedStubs returns stubs recorded from proxy mode.
@@ -488,7 +512,7 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 	// Check the fault timeline (if loaded). A fired event takes precedence
 	// over the stub's own fault/delay for this request, and can even apply
 	// when no stub matched (error-type faults need no response body).
-	if fired := s.timelineRunner.Check(r, s.startTime); fired != nil {
+	if fired := s.timelineRunner.Check(r, s.serverStartTime()); fired != nil {
 		s.serveTimelineFired(w, r, result, matched, stubID, fired)
 		return
 	}
@@ -523,6 +547,7 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 		fault := result.Stub.Response.Fault
 		if s.registry.ShouldRateLimit(result.Stub.ID, fault.AfterRequests, fault.PerSecond) {
 			s.writeRateLimited(w, r, fault)
+			s.metrics.faultsInjected.Add(1)
 			// Record the rate_limit fault injection
 			s.faultLog.Record(spec.FaultInjectionEntry{
 				StubID:         result.Stub.ID,
@@ -541,7 +566,7 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write the matched response (with optional gzip compression)
-	faultInfo, err := s.responseWriter.WriteResponse(w, result.Stub, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.startTime)
+	faultInfo, err := s.responseWriter.WriteResponse(w, result.Stub, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.serverStartTime())
 	if err != nil {
 		s.logger.Warn("failed to write response", "stub", result.Stub.ID, "error", err)
 	}
@@ -565,6 +590,18 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 		// the position observe returned for this request (not a counter read
 		// now), preserving exactness under concurrent requests.
 		s.timelineRecord.recordFire(r, result.Stub.Response.Fault, at)
+	} else if err == nil && result.Stub.Response.Delay != nil {
+		// Delay-only entries carry no activation mode: the delay applied
+		// unconditionally, and chaos-report.md promises every injection —
+		// delays included — appears in the fault log.
+		s.faultLog.Record(spec.FaultInjectionEntry{
+			StubID:        result.Stub.ID,
+			FaultType:     "delay",
+			DelayMs:       result.Stub.Response.Delay.Value,
+			ActivatedAt:   time.Now(),
+			RequestMethod: r.Method,
+			RequestPath:   r.URL.Path,
+		})
 	}
 
 	// Dispatch async callback (fire-and-forget)
@@ -583,6 +620,12 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 // event fired. The event's fault/delay replaces the stub's own; when no stub
 // matched, a default 200 stub is synthesized so the effect still applies.
 func (s *mockServer) serveTimelineFired(w http.ResponseWriter, r *http.Request, result *spec.MatchResult, matched bool, stubID string, fired *timeline.Fired) {
+	if matched {
+		s.metrics.requestsMatched.Add(1)
+	} else {
+		s.metrics.requestsUnmatched.Add(1)
+	}
+
 	def := spec.StubDefinition{Response: spec.ResponseDefinition{Status: http.StatusOK}}
 	if matched {
 		def = *result.Stub // copy: the event overrides the stub's effects
@@ -616,37 +659,52 @@ func (s *mockServer) serveTimelineFired(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	faultInfo, err := s.responseWriter.WriteResponse(w, &def, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.startTime)
+	faultInfo, err := s.responseWriter.WriteResponse(w, &def, r, corsOptsFromConfig(s.config.CORSOptions), hitCount, s.serverStartTime())
 	if err != nil {
 		s.logger.Warn("failed to write timeline response", "stub", stubID, "error", err)
 	}
 
-	if def.Response.Delay != nil {
+	// The log entry is gated on what actually happened: a delay entry only
+	// when the event declared a delay and the write succeeded, a fault entry
+	// only when WriteResponse reported an injection — otherwise the log would
+	// carry phantom evidence for injections that never occurred.
+	if fired.Delay != nil && err == nil {
 		s.metrics.faultsDelayed.Add(1)
-	}
-	if faultInfo.Injected {
+		s.faultLog.Record(spec.FaultInjectionEntry{
+			StubID:         stubID,
+			FaultType:      "delay",
+			DelayMs:        fired.Delay.Value,
+			ActivatedAt:    time.Now(),
+			RequestMethod:  r.Method,
+			RequestPath:    r.URL.Path,
+			ActivationMode: spec.ModeTimeline,
+			TimelineEvent:  fired.EventIndex + 1,
+		})
+	} else if faultInfo.Injected {
 		s.metrics.faultsInjected.Add(1)
+		s.faultLog.Record(spec.FaultInjectionEntry{
+			StubID:         stubID,
+			FaultType:      fired.Fault.Type,
+			ActivatedAt:    time.Now(),
+			RequestMethod:  r.Method,
+			RequestPath:    r.URL.Path,
+			ActivationMode: spec.ModeTimeline,
+			TimelineEvent:  fired.EventIndex + 1,
+		})
 	}
 
-	faultType := ""
-	if fired.Fault != nil {
-		faultType = fired.Fault.Type
+	// Dispatch async callback (fire-and-forget), mirroring serveMock: the
+	// timeline event overrides the stub's fault/delay for this request, not
+	// its callback — a fired event must not silently drop the side effect.
+	if matched && result.Stub.Response.Callback != nil {
+		s.callbackDisp.Dispatch(result.Stub.Response.Callback, result.Stub.ID, callback.RequestContext{
+			Method:      r.Method,
+			Path:        r.URL.Path,
+			QueryString: r.URL.RawQuery,
+			Headers:     headersToMap(r.Header),
+			Body:        readBodyForCallback(r),
+		})
 	}
-	delayMs := 0
-	if fired.Delay != nil {
-		faultType = "delay"
-		delayMs = fired.Delay.Value
-	}
-	s.faultLog.Record(spec.FaultInjectionEntry{
-		StubID:         stubID,
-		FaultType:      faultType,
-		DelayMs:        delayMs,
-		ActivatedAt:    time.Now(),
-		RequestMethod:  r.Method,
-		RequestPath:    r.URL.Path,
-		ActivationMode: spec.ModeTimeline,
-		TimelineEvent:  fired.EventIndex + 1,
-	})
 }
 
 // writeRateLimited writes a rate-limit response when the token bucket is empty.

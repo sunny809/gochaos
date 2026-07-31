@@ -77,6 +77,47 @@ func ValidateFault(fault *spec.FaultDefinition) error {
 	return nil
 }
 
+// validDelayTypes defines the set of supported delay types.
+var validDelayTypes = map[string]bool{
+	"fixed":     true,
+	"random":    true,
+	"lognormal": true,
+	"dribble":   true,
+	"timeout":   true,
+}
+
+// ValidateDelay performs validation of a DelayDefinition, including
+// type-specific parameter constraints. Returns nil if the definition is
+// valid. Unknown types are rejected (applyDelay would silently ignore them,
+// which would record a delay that never happened).
+func ValidateDelay(delay *spec.DelayDefinition) error {
+	if delay == nil {
+		return nil
+	}
+	if !validDelayTypes[delay.Type] {
+		valid := make([]string, 0, len(validDelayTypes))
+		for t := range validDelayTypes {
+			valid = append(valid, t)
+		}
+		sort.Strings(valid)
+		return fmt.Errorf("invalid delay type %q; valid types: %s", delay.Type, strings.Join(valid, ", "))
+	}
+	if delay.Type == "dribble" {
+		if delay.Chunks <= 0 {
+			return fmt.Errorf("delay.chunks must be > 0 for dribble type, got %d", delay.Chunks)
+		}
+		if delay.TotalDuration <= 0 && delay.Value <= 0 {
+			return fmt.Errorf("dribble delay requires totalDuration (or value) > 0")
+		}
+	}
+	if delay.Type == "lognormal" {
+		if delay.P50 <= 0 || (delay.P95 <= 0 && delay.P99 <= 0) {
+			return fmt.Errorf("lognormal delay requires p50 and one of p95/p99 to be non-zero")
+		}
+	}
+	return nil
+}
+
 // ValidateActivation checks that the activation configuration is valid.
 // A nil activation is valid (always-on behavior). When non-nil, each
 // configured field is validated:

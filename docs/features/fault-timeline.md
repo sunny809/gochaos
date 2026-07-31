@@ -66,12 +66,17 @@ events:
 ### Validation
 
 Rejected at load time with a descriptive error: unsupported `version`;
-`at` missing or setting both/neither `request`/`timeMs`; `until` with a
+`at` missing or setting both `request` and `timeMs` (an event with neither
+is time-keyed at `timeMs: 0` — it fires at server start); `until` with a
 different key type than `at`, or not strictly after `at` (an inverted
 window would never fire); an event with neither `fault` nor `delay`
 (exactly one is required); `fault` and `delay` set together (they are
 mutually exclusive); `activation` on an event's `fault` — not supported on
-timeline events (the event table decides when); negative triggers.
+timeline events (the event table decides when); negative triggers; an
+empty `match` (it would match every request); regexes that fail to
+compile; unknown fault types, `rate_limit` without `perSecond`, unknown
+delay types, `dribble` without `chunks`, or `lognormal` without `p50` +
+one of `p95`/`p99`.
 
 ## Record
 
@@ -93,8 +98,10 @@ event that fired so far:
 
 > **Limitation:** stub **delay-only** injections are not recorded for
 > export — the recorder captures fault fires only, so a recorded run using
-> delay-only stubs replays without those delays (the full delay-record path
-> is a tracked follow-up, not part of this round).
+> delay-only stubs replays without those delays. Delays are still fully
+> visible in the fault log and the [chaos report](chaos-report.md) (every
+> delay appears there as a `delay` entry); only the *replayable artifact*
+> is fault-only.
 
 Workflow: run probabilistic chaos locally (several seeds), pick a real fault
 sequence worth asserting, `ExportTimeline`, commit the YAML. The committed

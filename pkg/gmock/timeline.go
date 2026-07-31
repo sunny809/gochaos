@@ -20,10 +20,13 @@ func (s *mockServer) LoadTimelineYAML(data []byte) error {
 }
 
 // LoadTimeline installs a fault timeline from a struct (declare or replay).
+// The recorder is cleared so record mode starts fresh: recorded fires from a
+// previous timeline must not bleed into the new run's export.
 func (s *mockServer) LoadTimeline(tl *FaultTimeline) error {
 	if err := s.timelineRunner.Load(tl); err != nil {
 		return fmt.Errorf("gmock: invalid timeline: %w", err)
 	}
+	s.timelineRecord.clear()
 	return nil
 }
 
@@ -104,10 +107,11 @@ func (r *timelineRecorder) recordFire(req *http.Request, fault *spec.FaultDefini
 	defer r.mu.Unlock()
 	k := r.keys[key]
 	if k == nil {
-		// A fire without a prior observe (e.g. recorder state cleared
-		// between observe and recordFire) must still be recorded.
-		k = &recordedKey{method: req.Method, path: req.URL.Path}
-		r.keys[key] = k
+		// No prior observe for this key: the recorder was cleared (Reset)
+		// between observe and recordFire, so the observed position belongs
+		// to the previous epoch. Dropping the fire keeps the new epoch's
+		// export free of phantom events at stale positions.
+		return
 	}
 	k.fires = append(k.fires, recordedFire{at: at, fault: fault})
 }
@@ -147,22 +151,23 @@ func (r *timelineRecorder) events() []TimelineEvent {
 		if len(k.fires) == 0 {
 			continue
 		}
-		fired := make([]int, 0, len(k.fires))
-		for _, f := range k.fires {
-			fired = append(fired, f.at)
-		}
-		sort.Ints(fired)
+		// Fires are recorded in completion order, which can differ from
+		// observe order when stubs delay responses under concurrency — sort
+		// by position so each window carries the fault of the fire at its
+		// actual observed position (otherwise replay injects the wrong fault
+		// at the wrong positions).
+		sort.SliceStable(k.fires, func(i, j int) bool { return k.fires[i].at < k.fires[j].at })
 
 		consumed := 0 // fires of earlier windows (each consumes one request)
-		for i := 0; i < len(fired); {
+		for i := 0; i < len(k.fires); {
 			j := i
-			for j+1 < len(fired) && fired[j+1] == fired[j]+1 {
+			for j+1 < len(k.fires) && k.fires[j+1].at == k.fires[j].at+1 {
 				j++
 			}
-			at := fired[i] - consumed
+			at := k.fires[i].at - consumed
 			var until *TimelineTrigger
 			if j > i {
-				until = &TimelineTrigger{Request: fired[j] - consumed}
+				until = &TimelineTrigger{Request: k.fires[j].at - consumed}
 			}
 			events = append(events, TimelineEvent{
 				At:    &TimelineTrigger{Request: at},

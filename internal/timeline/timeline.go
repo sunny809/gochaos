@@ -9,10 +9,12 @@ package timeline
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
 	"github.com/sunny809/gochaos/internal/matcher"
+	"github.com/sunny809/gochaos/internal/response"
 	"github.com/sunny809/gochaos/internal/spec"
 	"github.com/sunny809/gochaos/internal/stub"
 )
@@ -138,7 +140,7 @@ func (e *eventState) shouldFire(elapsedMs int64) bool {
 		return false
 	}
 
-	// Time-keyed trigger (At.TimeMs > 0, guaranteed by validation).
+	// Time-keyed trigger (At.TimeMs >= 0, guaranteed by validation).
 	if e.def.Until != nil && e.def.Until.TimeMs > 0 {
 		if elapsedMs >= e.def.Until.TimeMs {
 			e.exhausted = true
@@ -173,15 +175,66 @@ func (r *Runner) Export() *spec.FaultTimeline {
 		if last := e.fired[len(e.fired)-1]; last > e.fired[0] {
 			until = &spec.TimelineTrigger{Request: last}
 		}
-		tl.Events = append(tl.Events, spec.TimelineEvent{
+		event := spec.TimelineEvent{
 			At:    at,
 			Until: until,
 			Match: e.def.Match,
-			Fault: e.def.Fault,
-			Delay: e.def.Delay,
-		})
+		}
+		// Copy the fault/delay: the loaded timeline's pointers are live
+		// (Check returns them to the response pipeline on every firing
+		// request), so the exported artifact must not alias them — mutating
+		// it would change the running server's next injection.
+		if e.def.Fault != nil {
+			f := *e.def.Fault
+			event.Fault = &f
+		}
+		if e.def.Delay != nil {
+			d := *e.def.Delay
+			event.Delay = &d
+		}
+		tl.Events = append(tl.Events, event)
 	}
 	return tl
+}
+
+// validateMatch checks that a timeline event's match pattern is non-empty and
+// that every regex-bearing criterion compiles. The stub engine's BuildMatcher
+// silently drops invalid header/cookie/query/body patterns and panics on an
+// invalid urlPathRegex (MustNewPathRegexMatcher), either of which would
+// broaden an event to fire on requests it should not match — so the timeline
+// validates them at load time, as the spec's "rejected at load" contract
+// promises.
+func validateMatch(p spec.RequestPattern) error {
+	if p.Method == "" && p.URLPath == "" && p.URLPathRegex == "" && p.Accept == "" &&
+		len(p.QueryParams) == 0 && len(p.Headers) == 0 && len(p.Cookies) == 0 && p.Body == nil {
+		return fmt.Errorf("match must set at least one criterion")
+	}
+	if p.URLPathRegex != "" {
+		if _, err := regexp.Compile(p.URLPathRegex); err != nil {
+			return fmt.Errorf("urlPathRegex: %w", err)
+		}
+	}
+	for name, pattern := range p.Headers {
+		if _, err := matcher.NewHeaderMatcher(name, pattern); err != nil {
+			return fmt.Errorf("headers[%s]: %w", name, err)
+		}
+	}
+	for name, pattern := range p.Cookies {
+		if _, err := matcher.NewCookieMatcher(name, pattern); err != nil {
+			return fmt.Errorf("cookies[%s]: %w", name, err)
+		}
+	}
+	for key, pattern := range p.QueryParams {
+		if _, err := matcher.NewQueryParamMatcher(key, pattern); err != nil {
+			return fmt.Errorf("queryParams[%s]: %w", key, err)
+		}
+	}
+	if p.Body != nil && p.Body.RegexMatch != "" {
+		if _, err := matcher.NewBodyRegexMatcher(p.Body.RegexMatch); err != nil {
+			return fmt.Errorf("body.regexMatch: %w", err)
+		}
+	}
+	return nil
 }
 
 // Validate checks a FaultTimeline against the artifact rules (spec §2).
@@ -200,8 +253,16 @@ func Validate(tl *spec.FaultTimeline) error {
 		if e.At.Request < 0 || e.At.TimeMs < 0 {
 			return fmt.Errorf("timeline: %s: at: negative triggers are invalid", idx)
 		}
-		if (e.At.Request > 0) == (e.At.TimeMs > 0) {
+		// Exactly one key. Request > 0 means request-keyed; otherwise the
+		// event is time-keyed and TimeMs 0 is a valid key ("fire at server
+		// start", spec: TimeMs >= 0) — a request-keyed trigger's zero TimeMs
+		// is the zero value, not a second key, so only Request > 0 AND
+		// TimeMs > 0 together are ambiguous.
+		if e.At.Request > 0 && e.At.TimeMs > 0 {
 			return fmt.Errorf("timeline: %s: at must set exactly one of request or timeMs", idx)
+		}
+		if err := validateMatch(e.Match); err != nil {
+			return fmt.Errorf("timeline: %s: match: %w", idx, err)
 		}
 		if e.Fault != nil && e.Delay != nil {
 			return fmt.Errorf("timeline: %s: fault and delay are mutually exclusive", idx)
@@ -209,20 +270,29 @@ func Validate(tl *spec.FaultTimeline) error {
 		if e.Fault == nil && e.Delay == nil {
 			return fmt.Errorf("timeline: %s: event must set exactly one of fault or delay", idx)
 		}
-		if e.Fault != nil && e.Fault.Activation != nil {
-			return fmt.Errorf("timeline: %s: activation is not supported on timeline event faults (the event table decides when)", idx)
+		if e.Fault != nil {
+			if e.Fault.Activation != nil {
+				return fmt.Errorf("timeline: %s: activation is not supported on timeline event faults (the event table decides when)", idx)
+			}
+			if err := response.ValidateFault(e.Fault); err != nil {
+				return fmt.Errorf("timeline: %s: %w", idx, err)
+			}
+		}
+		if e.Delay != nil {
+			if err := response.ValidateDelay(e.Delay); err != nil {
+				return fmt.Errorf("timeline: %s: %w", idx, err)
+			}
 		}
 		if e.Until != nil {
 			if e.Until.Request < 0 || e.Until.TimeMs < 0 {
 				return fmt.Errorf("timeline: %s: until: negative triggers are invalid", idx)
 			}
+			// Unlike at, until has no TimeMs-0 key: a window that ends at
+			// server start is meaningless, so both-zero until is not "set".
 			if (e.Until.Request > 0) == (e.Until.TimeMs > 0) {
 				return fmt.Errorf("timeline: %s: until must set exactly one of request or timeMs", idx)
 			}
-			if e.Until.Request > 0 && e.At.Request == 0 {
-				return fmt.Errorf("timeline: %s: until must use the same key type as at", idx)
-			}
-			if e.Until.TimeMs > 0 && e.At.TimeMs == 0 {
+			if (e.Until.Request > 0) != (e.At.Request > 0) {
 				return fmt.Errorf("timeline: %s: until must use the same key type as at", idx)
 			}
 			if e.Until.Request > 0 && e.Until.Request <= e.At.Request {

@@ -25,6 +25,8 @@ func TestValidate(t *testing.T) {
 		Events: []spec.TimelineEvent{
 			{At: &spec.TimelineTrigger{Request: 3}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}},
 			{At: &spec.TimelineTrigger{TimeMs: 5000}, Until: &spec.TimelineTrigger{TimeMs: 15000}, Match: spec.RequestPattern{URLPath: "/b"}, Delay: &spec.DelayDefinition{Type: "fixed", Value: 100}},
+			// TimeMs 0 is a valid time key: the event fires at server start.
+			{At: &spec.TimelineTrigger{TimeMs: 0}, Match: spec.RequestPattern{URLPath: "/c"}, Fault: &spec.FaultDefinition{Type: "error"}},
 		},
 	}
 	if err := Validate(valid); err != nil {
@@ -39,8 +41,14 @@ func TestValidate(t *testing.T) {
 		{"wrong version", &spec.FaultTimeline{Version: 2, Events: valid.Events}},
 		{"missing at", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{Match: spec.RequestPattern{URLPath: "/a"}}}}},
 		{"at sets both keys", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1, TimeMs: 5}, Match: spec.RequestPattern{URLPath: "/a"}}}}},
-		{"at sets neither key", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{}, Match: spec.RequestPattern{URLPath: "/a"}}}}},
 		{"at negative request", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: -1}, Match: spec.RequestPattern{URLPath: "/a"}}}}},
+		{"empty match", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Fault: &spec.FaultDefinition{Type: "error"}}}}},
+		{"invalid urlPathRegex", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPathRegex: "("}, Fault: &spec.FaultDefinition{Type: "error"}}}}},
+		{"invalid header regex", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a", Headers: map[string]string{"X-Test": "~("}}, Fault: &spec.FaultDefinition{Type: "error"}}}}},
+		{"invalid fault type", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "bogus"}}}}},
+		{"rate_limit without perSecond", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "rate_limit"}}}}},
+		{"invalid delay type", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a"}, Delay: &spec.DelayDefinition{Type: "bogus", Value: 10}}}}},
+		{"dribble without chunks", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a"}, Delay: &spec.DelayDefinition{Type: "dribble", Value: 100}}}}},
 		{"fault and delay both set", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}, Delay: &spec.DelayDefinition{Type: "fixed", Value: 10}}}}},
 		{"until key type mismatch", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Until: &spec.TimelineTrigger{TimeMs: 5}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}}}}},
 		{"inverted index window", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 5}, Until: &spec.TimelineTrigger{Request: 3}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}}}}},
@@ -120,7 +128,9 @@ func TestCheckTimeWindow(t *testing.T) {
 	tl := &spec.FaultTimeline{
 		Version: 1,
 		Events: []spec.TimelineEvent{
-			{At: &spec.TimelineTrigger{TimeMs: 5000}, Until: &spec.TimelineTrigger{TimeMs: 15000}, Match: spec.RequestPattern{URLPath: "/api/t"}, Fault: &spec.FaultDefinition{Type: "connection_reset"}},
+			// Window [5000, 45000): wide enough that a slow test runner
+			// (elapsed ~10s vs ~15s) cannot exit the window mid-check.
+			{At: &spec.TimelineTrigger{TimeMs: 5000}, Until: &spec.TimelineTrigger{TimeMs: 45000}, Match: spec.RequestPattern{URLPath: "/api/t"}, Fault: &spec.FaultDefinition{Type: "connection_reset"}},
 		},
 	}
 	if err := r.Load(tl); err != nil {
@@ -139,13 +149,36 @@ func TestCheckTimeWindow(t *testing.T) {
 		t.Fatal("expected no fire outside time window")
 	}
 
-	// 30s ago: elapsed ~30s -> past the window; event must be exhausted.
-	past := time.Now().Add(-30 * time.Second)
+	// 60s ago: elapsed ~60s -> past the window; event must be exhausted.
+	past := time.Now().Add(-60 * time.Second)
 	if f := r.Check(newRequest(t, "/api/t"), past); f != nil {
 		t.Fatal("expected no fire after window end")
 	}
 	if f := r.Check(newRequest(t, "/api/t"), inside); f != nil {
 		t.Fatal("expected no fire after exhaustion")
+	}
+}
+
+// TestCheckTimeMsZeroFiresImmediately: a time-keyed event with TimeMs 0 fires
+// on the first matching request — elapsed time is always >= 0.
+func TestCheckTimeMsZeroFiresImmediately(t *testing.T) {
+	r := NewRunner()
+	tl := &spec.FaultTimeline{
+		Version: 1,
+		Events: []spec.TimelineEvent{
+			{At: &spec.TimelineTrigger{TimeMs: 0}, Match: spec.RequestPattern{URLPath: "/api/zero"}, Fault: &spec.FaultDefinition{Type: "error"}},
+		},
+	}
+	if err := r.Load(tl); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+
+	if f := r.Check(newRequest(t, "/api/zero"), start); f == nil {
+		t.Fatal("expected fire on first matching request at timeMs 0")
+	}
+	if f := r.Check(newRequest(t, "/api/zero"), start); f != nil {
+		t.Fatal("expected no fire after single-shot exhaustion")
 	}
 }
 

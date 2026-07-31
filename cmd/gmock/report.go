@@ -35,11 +35,17 @@ func newReportCmd() *cobra.Command {
 			defer resp.Body.Close()
 
 			if resp.StatusCode >= 400 {
-				body, _ := io.ReadAll(resp.Body)
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return fmt.Errorf("server returned %d (unreadable body: %w)", resp.StatusCode, err)
+				}
 				return fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
 			}
 
-			body, _ := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("read report body: %w", err)
+			}
 			if format == "json" {
 				var pretty bytes.Buffer
 				if err := json.Indent(&pretty, body, "", "  "); err == nil {

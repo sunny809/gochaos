@@ -82,7 +82,9 @@ func TestExportTimeEventBecomesRequestKeyed(t *testing.T) {
 	tl := &spec.FaultTimeline{
 		Version: 1,
 		Events: []spec.TimelineEvent{
-			{At: &spec.TimelineTrigger{TimeMs: 5000}, Until: &spec.TimelineTrigger{TimeMs: 15000}, Match: spec.RequestPattern{URLPath: "/api/t"}, Fault: &spec.FaultDefinition{Type: "connection_reset"}},
+			// Window [5000, 45000): wide enough that a slow test runner cannot
+			// exit the window mid-check (see TestCheckTimeWindow).
+			{At: &spec.TimelineTrigger{TimeMs: 5000}, Until: &spec.TimelineTrigger{TimeMs: 45000}, Match: spec.RequestPattern{URLPath: "/api/t"}, Fault: &spec.FaultDefinition{Type: "connection_reset"}},
 		},
 	}
 	if err := r.Load(tl); err != nil {
@@ -104,6 +106,48 @@ func TestExportTimeEventBecomesRequestKeyed(t *testing.T) {
 	}
 	if e.Until == nil || e.Until.Request != 4 {
 		t.Fatalf("expected until.request=4, got %+v", e.Until)
+	}
+}
+
+// TestExportCopiesFaultDelay: the exported artifact must not alias the loaded
+// timeline's fault/delay pointers. Check returns those live pointers on every
+// firing request, so mutating the exported artifact must not change what the
+// runner injects next.
+func TestExportCopiesFaultDelay(t *testing.T) {
+	r := NewRunner()
+	tl := &spec.FaultTimeline{
+		Version: 1,
+		Events: []spec.TimelineEvent{
+			// Windows [1,3]: the events fire again after the export, so the
+			// mutation test can observe the runner's live definitions.
+			{At: &spec.TimelineTrigger{Request: 1}, Until: &spec.TimelineTrigger{Request: 3}, Match: spec.RequestPattern{URLPath: "/api/f"}, Fault: &spec.FaultDefinition{Type: "error"}},
+			{At: &spec.TimelineTrigger{Request: 1}, Until: &spec.TimelineTrigger{Request: 3}, Match: spec.RequestPattern{URLPath: "/api/d"}, Delay: &spec.DelayDefinition{Type: "fixed", Value: 100}},
+		},
+	}
+	if err := r.Load(tl); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	r.Check(newRequest(t, "/api/f"), start)
+	r.Check(newRequest(t, "/api/d"), start)
+
+	out := r.Export()
+	if len(out.Events) != 2 {
+		t.Fatalf("expected 2 exported events, got %d", len(out.Events))
+	}
+
+	// Mutate the exported definitions; the runner must still inject the
+	// original values on its next firing requests.
+	out.Events[0].Fault.Type = "empty"
+	out.Events[1].Delay.Value = 999
+
+	f := r.Check(newRequest(t, "/api/f"), start)
+	if f == nil || f.Fault == nil || f.Fault.Type != "error" {
+		t.Fatalf("exported fault aliased the live definition: got %+v", f)
+	}
+	d := r.Check(newRequest(t, "/api/d"), start)
+	if d == nil || d.Delay == nil || d.Delay.Value != 100 {
+		t.Fatalf("exported delay aliased the live definition: got %+v", d)
 	}
 }
 

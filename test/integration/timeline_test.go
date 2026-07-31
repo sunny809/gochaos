@@ -2,7 +2,9 @@ package integration_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/sunny809/gochaos/pkg/gmock"
 	"gopkg.in/yaml.v3"
@@ -281,7 +283,7 @@ version: 1
 events:
   - at: { request: 1 }
     match: { method: GET, urlPath: /api/declared }
-    fault: { type: rate_limit }
+    fault: { type: rate_limit, perSecond: 1 }
 `)); err != nil {
 		t.Fatalf("load timeline: %v", err)
 	}
@@ -306,6 +308,180 @@ events:
 	}, 1)
 	if !result.Matched {
 		t.Fatalf("expected 1 timeline rate_limit fault: %v", result.Errors)
+	}
+}
+
+// TestTimelineUnmatchedRequestStillInjected: a fired timeline event applies
+// its fault even when no stub matched — the synthesized default-200 stub
+// carries the event's effect, so the client sees the injection (500), not a
+// 404 near-miss response.
+func TestTimelineUnmatchedRequestStillInjected(t *testing.T) {
+	server, stop := startServer(t)
+	defer stop()
+
+	// No stub for /api/ghost: the only response comes from the timeline.
+	if err := server.LoadTimelineYAML([]byte(`
+version: 1
+events:
+  - at: { request: 1 }
+    match: { method: GET, urlPath: /api/ghost }
+    fault: { type: error }
+`)); err != nil {
+		t.Fatalf("load timeline: %v", err)
+	}
+
+	resp, err := http.Get(server.URL() + "/api/ghost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("got status %d, want 500 (timeline injection on unmatched request)", resp.StatusCode)
+	}
+
+	result := server.VerifyFaultsInjected(gmock.FaultPattern{
+		FaultType:      "error",
+		ActivationMode: "timeline",
+	}, 1)
+	if !result.Matched {
+		t.Fatalf("expected 1 timeline fault on unmatched request: %v", result.Errors)
+	}
+}
+
+// TestTimelineFiredEventDispatchesCallback: a timeline event overrides the
+// stub's fault/delay but not its callback — the fired request must still
+// dispatch the async callback.
+func TestTimelineFiredEventDispatchesCallback(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	server, stop := startServer(t, gmock.WithCallbackSSRFBypass())
+	defer stop()
+
+	server.Stub(gmock.StubDefinition{
+		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/webhook"},
+		Response: gmock.ResponseDefinition{
+			Status: http.StatusOK,
+			Body:   `{"ok":true}`,
+			Callback: &gmock.CallbackDefinition{
+				URL:    target.URL + "/cb",
+				Method: http.MethodPost,
+			},
+		},
+	})
+
+	if err := server.LoadTimelineYAML([]byte(`
+version: 1
+events:
+  - at: { request: 1 }
+    match: { method: GET, urlPath: /api/webhook }
+    delay: { type: fixed, value: 30 }
+`)); err != nil {
+		t.Fatalf("load timeline: %v", err)
+	}
+
+	resp, err := http.Get(server.URL() + "/api/webhook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// The dispatch is async; poll the callback log for the entry.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		result := server.VerifyCallbacks(gmock.CallbackPattern{
+			Method: http.MethodGet,
+			Status: string(gmock.CallbackDelivered),
+		}, 1)
+		if result.Matched {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected callback dispatched on timeline-fired request: %v", result.Errors)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestTimelineTimeZeroRefiresAfterReset: a timeMs:0 event fires at server
+// start; after Reset re-baselines the epoch, the same event fires again —
+// time-keyed triggers are not permanently dead after reset.
+func TestTimelineTimeZeroRefiresAfterReset(t *testing.T) {
+	server, stop := startServer(t)
+	defer stop()
+
+	server.Stub(gmock.StubDefinition{
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/armed"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK, Body: `{"ok":true}`},
+	})
+
+	if err := server.LoadTimelineYAML([]byte(`
+version: 1
+events:
+  - at: { timeMs: 0 }
+    match: { method: GET, urlPath: /api/armed }
+    fault: { type: error }
+`)); err != nil {
+		t.Fatalf("load timeline: %v", err)
+	}
+
+	// Run 1: request 1 fires the event (500), request 2 is exhausted (200).
+	want := []int{500, 200}
+	for i, wantStatus := range want {
+		resp, err := http.Get(server.URL() + "/api/armed")
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != wantStatus {
+			t.Fatalf("request %d: got status %d, want %d", i, resp.StatusCode, wantStatus)
+		}
+	}
+
+	server.Reset()
+
+	// Reset deletes stubs too, so re-register before re-running.
+	server.Stub(gmock.StubDefinition{
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/armed"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK, Body: `{"ok":true}`},
+	})
+
+	// Run 2: the epoch re-baselined, so the timeMs:0 event arms again.
+	for i, wantStatus := range want {
+		resp, err := http.Get(server.URL() + "/api/armed")
+		if err != nil {
+			t.Fatalf("post-reset request %d: %v", i, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != wantStatus {
+			t.Fatalf("post-reset request %d: got status %d, want %d", i, resp.StatusCode, wantStatus)
+		}
+	}
+}
+
+// TestStubDelayOnlyAppearsInFaultLog: a stub whose only effect is a delay
+// still lands in the fault log as a "delay" entry, so chaos reports cover
+// every injection — delays included.
+func TestStubDelayOnlyAppearsInFaultLog(t *testing.T) {
+	server, stop := startServer(t)
+	defer stop()
+
+	server.Stub(gmock.StubDefinition{
+		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/lag"},
+		Response: gmock.ResponseDefinition{Status: http.StatusOK, Body: `{"ok":true}`, Delay: &gmock.DelayDefinition{Type: "fixed", Value: 50}},
+	})
+
+	resp, err := http.Get(server.URL() + "/api/lag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	result := server.VerifyFaultsInjected(gmock.FaultPattern{FaultType: "delay"}, 1)
+	if !result.Matched {
+		t.Fatalf("expected 1 delay entry for delay-only stub: %v", result.Errors)
 	}
 }
 
