@@ -146,7 +146,13 @@ func (e *eventState) shouldFire(elapsedMs int64) bool {
 		}
 		return elapsedMs >= e.def.At.TimeMs
 	}
-	return elapsedMs >= e.def.At.TimeMs
+	// Time single-shot: fire on the first matching request at/after
+	// At.TimeMs, then exhaust (mirrors the index single-shot pattern).
+	if elapsedMs >= e.def.At.TimeMs {
+		e.exhausted = true
+		return true
+	}
+	return false
 }
 
 // Export assembles a FaultTimeline artifact from the events that actually
@@ -200,6 +206,12 @@ func Validate(tl *spec.FaultTimeline) error {
 		if e.Fault != nil && e.Delay != nil {
 			return fmt.Errorf("timeline: %s: fault and delay are mutually exclusive", idx)
 		}
+		if e.Fault == nil && e.Delay == nil {
+			return fmt.Errorf("timeline: %s: event must set exactly one of fault or delay", idx)
+		}
+		if e.Fault != nil && e.Fault.Activation != nil {
+			return fmt.Errorf("timeline: %s: activation is not supported on timeline event faults (the event table decides when)", idx)
+		}
 		if e.Until != nil {
 			if e.Until.Request < 0 || e.Until.TimeMs < 0 {
 				return fmt.Errorf("timeline: %s: until: negative triggers are invalid", idx)
@@ -212,6 +224,12 @@ func Validate(tl *spec.FaultTimeline) error {
 			}
 			if e.Until.TimeMs > 0 && e.At.TimeMs == 0 {
 				return fmt.Errorf("timeline: %s: until must use the same key type as at", idx)
+			}
+			if e.Until.Request > 0 && e.Until.Request <= e.At.Request {
+				return fmt.Errorf("timeline: %s: until.request must be greater than at.request (inverted window)", idx)
+			}
+			if e.Until.TimeMs > 0 && e.Until.TimeMs <= e.At.TimeMs {
+				return fmt.Errorf("timeline: %s: until.timeMs must be greater than at.timeMs (inverted window)", idx)
 			}
 		}
 	}

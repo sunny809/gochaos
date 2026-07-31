@@ -128,8 +128,10 @@ if !result.Matched {
 }
 ```
 
-With seed 42 this run records 10 faults out of 20 requests; your run may
-record a different count, but the replay always mirrors the record exactly.
+With seed 42 this run records 11 faults out of 20 requests. The seed pins
+the count: any run with seed 42 records the same 11 — it varies only across
+gochaos versions, whose RNG sequences differ (the tutorial's own thesis).
+The replay always mirrors the record exactly.
 
 ## Report Evidence
 

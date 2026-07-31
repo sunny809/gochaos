@@ -81,9 +81,14 @@ events:
 **Validation** (rejected at load time with a descriptive error):
 
 - `At` required; exactly one of `At.Request` / `At.TimeMs` set.
-- `Fault` XOR `Delay` (at most one).
+- `Fault` XOR `Delay` — **exactly one** of the two must be set (an event
+  with neither is invalid: it would consume requests and render as a fake
+  delay in reports).
 - `Until` must use the same key type as `At` (index window with index, time
   window with time).
+- `Until` must be strictly greater than `At` (same key type): an inverted
+  window (e.g. `at.request: 5`, `until.request: 3`) would silently never
+  fire and is rejected at load.
 - `Request >= 1`, `TimeMs >= 0`, `Match` non-empty.
 
 ## 3. Runtime & data flow
@@ -151,7 +156,7 @@ type TimelineEvent struct {
     At    *TimelineTrigger   // required; Request xor TimeMs
     Until *TimelineTrigger   // optional; same key type as At
     Match RequestPattern     // reuses existing pattern
-    Fault *FaultDefinition   // reuses existing; XOR with Delay
+    Fault *FaultDefinition   // reuses existing; exactly one of Fault/Delay
     Delay *DelayDefinition
 }
 type TimelineTrigger struct {

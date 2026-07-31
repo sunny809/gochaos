@@ -18,7 +18,7 @@ Every injection is recorded with:
 | `faultType` | `error`, `empty`, `connection_reset`, `malformed`, `random_data`, `slow_close`, `rate_limit`, or `delay` |
 | `activatedAt` | RFC 3339 timestamp of the injection |
 | `requestMethod` / `requestPath` | The request the injection hit |
-| `activationMode` | `probability`, `nth_request`, `time_window`, `always`, `rate_limit`, `timeline` |
+| `activationMode` | `probability`, `nth_request`, `time_window`, `combined`, `always`, `rate_limit`, `timeline` |
 | `timelineEvent` | 1-based index of the timeline event that injected this entry (0 = not timeline-driven) |
 | `delayMs` | Configured delay value for `delay` entries |
 

@@ -67,8 +67,11 @@ events:
 
 Rejected at load time with a descriptive error: unsupported `version`;
 `at` missing or setting both/neither `request`/`timeMs`; `until` with a
-different key type than `at`; `fault` and `delay` set together (they are
-mutually exclusive); negative triggers.
+different key type than `at`, or not strictly after `at` (an inverted
+window would never fire); an event with neither `fault` nor `delay`
+(exactly one is required); `fault` and `delay` set together (they are
+mutually exclusive); `activation` on an event's `fault` — not supported on
+timeline events (the event table decides when); negative triggers.
 
 ## Record
 
@@ -85,6 +88,13 @@ event that fired so far:
 - Consecutive fires of one event collapse into a single `at`/`until` window.
 - Recorded stub-driven faults have their `activation` stripped: the event
   table decides when they fire on replay, so they replay unconditionally.
+- Recorder keys are (method, path) only: stubs whose faults differ by
+  header or query collapse into one event carrying the first fire's fault.
+
+> **Limitation:** stub **delay-only** injections are not recorded for
+> export — the recorder captures fault fires only, so a recorded run using
+> delay-only stubs replays without those delays (the full delay-record path
+> is a tracked follow-up, not part of this round).
 
 Workflow: run probabilistic chaos locally (several seeds), pick a real fault
 sequence worth asserting, `ExportTimeline`, commit the YAML. The committed
@@ -139,8 +149,8 @@ Server methods (all also available via the admin-less Go library):
 | `events[].at.timeMs` | int64 | either/or | ms since server start |
 | `events[].until` | trigger | no | Window end; same key type as `at` |
 | `events[].match` | RequestPattern | yes | `method`, `urlPath`, `urlPathRegex`, `queryParams`, `headers`, `cookies`, `body`, `accept`, `priority` — reuse the stub matcher |
-| `events[].fault` | FaultDefinition | XOR with `delay` | `error`, `empty`, `connection_reset`, `malformed`, `random_data`, `slow_close`, `rate_limit` + their parameters |
-| `events[].delay` | DelayDefinition | XOR with `fault` | `fixed`, `random`, `timeout`, `lognormal`, `dribble` + their parameters |
+| `events[].fault` | FaultDefinition | exactly one of `fault`/`delay` | `error`, `empty`, `connection_reset`, `malformed`, `random_data`, `slow_close`, `rate_limit` + their parameters (`activation` is not supported here and is rejected at load) |
+| `events[].delay` | DelayDefinition | exactly one of `fault`/`delay` | `fixed`, `random`, `timeout`, `lognormal`, `dribble` + their parameters |
 
 ## Relationship to Activation
 

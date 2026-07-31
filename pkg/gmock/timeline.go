@@ -60,7 +60,9 @@ type recordedKey struct {
 // can serialize them into a replayable artifact (record mode). It mirrors
 // the timeline runner's first-match-wins counter semantics: the per-key
 // counter advances on every matching request that no timeline event
-// consumed, and fires are tagged with the counter value at fire time.
+// consumed, and each fire is tagged with the request's observed position —
+// the value observe returned for that request — so replay counters align
+// exactly even under concurrency.
 type timelineRecorder struct {
 	mu   sync.Mutex
 	keys map[string]*recordedKey

@@ -23,8 +23,8 @@ func TestValidate(t *testing.T) {
 	valid := &spec.FaultTimeline{
 		Version: 1,
 		Events: []spec.TimelineEvent{
-			{At: &spec.TimelineTrigger{Request: 3}, Match: spec.RequestPattern{URLPath: "/a"}},
-			{At: &spec.TimelineTrigger{TimeMs: 5000}, Until: &spec.TimelineTrigger{TimeMs: 15000}, Match: spec.RequestPattern{URLPath: "/b"}},
+			{At: &spec.TimelineTrigger{Request: 3}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}},
+			{At: &spec.TimelineTrigger{TimeMs: 5000}, Until: &spec.TimelineTrigger{TimeMs: 15000}, Match: spec.RequestPattern{URLPath: "/b"}, Delay: &spec.DelayDefinition{Type: "fixed", Value: 100}},
 		},
 	}
 	if err := Validate(valid); err != nil {
@@ -42,7 +42,11 @@ func TestValidate(t *testing.T) {
 		{"at sets neither key", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{}, Match: spec.RequestPattern{URLPath: "/a"}}}}},
 		{"at negative request", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: -1}, Match: spec.RequestPattern{URLPath: "/a"}}}}},
 		{"fault and delay both set", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}, Delay: &spec.DelayDefinition{Type: "fixed", Value: 10}}}}},
-		{"until key type mismatch", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Until: &spec.TimelineTrigger{TimeMs: 5}, Match: spec.RequestPattern{URLPath: "/a"}}}}},
+		{"until key type mismatch", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Until: &spec.TimelineTrigger{TimeMs: 5}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}}}}},
+		{"inverted index window", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 5}, Until: &spec.TimelineTrigger{Request: 3}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}}}}},
+		{"inverted time window", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{TimeMs: 15000}, Until: &spec.TimelineTrigger{TimeMs: 5000}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error"}}}}},
+		{"no fault and no delay", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a"}}}}},
+		{"activation on timeline fault", &spec.FaultTimeline{Version: 1, Events: []spec.TimelineEvent{{At: &spec.TimelineTrigger{Request: 1}, Match: spec.RequestPattern{URLPath: "/a"}, Fault: &spec.FaultDefinition{Type: "error", Activation: &spec.Activation{Probability: 0.5}}}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,6 +146,45 @@ func TestCheckTimeWindow(t *testing.T) {
 	}
 	if f := r.Check(newRequest(t, "/api/t"), inside); f != nil {
 		t.Fatal("expected no fire after exhaustion")
+	}
+}
+
+// TestCheckTimeSingleShotExhausts: a time-keyed single-shot event fires on
+// the first matching request at/after At.TimeMs, then is exhausted — later
+// matching requests (still at/after At.TimeMs) must not fire. Clear()
+// re-arms it, mirroring the index single-shot pattern.
+func TestCheckTimeSingleShotExhausts(t *testing.T) {
+	r := NewRunner()
+	tl := &spec.FaultTimeline{
+		Version: 1,
+		Events: []spec.TimelineEvent{
+			{At: &spec.TimelineTrigger{TimeMs: 5000}, Match: spec.RequestPattern{URLPath: "/api/s"}, Fault: &spec.FaultDefinition{Type: "error"}},
+		},
+	}
+	if err := r.Load(tl); err != nil {
+		t.Fatal(err)
+	}
+
+	// 10s ago: elapsed ~10s -> at/after At.TimeMs, so the single shot fires.
+	inside := time.Now().Add(-10 * time.Second)
+	if f := r.Check(newRequest(t, "/api/s"), inside); f == nil {
+		t.Fatal("expected fire on first matching request at/after at.timeMs")
+	}
+
+	// Subsequent matching requests (still at/after At.TimeMs) must not fire.
+	for i := 0; i < 3; i++ {
+		if f := r.Check(newRequest(t, "/api/s"), inside); f != nil {
+			t.Fatalf("request %d: expected no fire after exhaustion", i+1)
+		}
+	}
+
+	// Clear() re-arms: the next matching request fires again.
+	r.Clear()
+	if f := r.Check(newRequest(t, "/api/s"), inside); f == nil {
+		t.Fatal("expected fire after clear")
+	}
+	if f := r.Check(newRequest(t, "/api/s"), inside); f != nil {
+		t.Fatal("expected no fire after re-exhaustion")
 	}
 }
 

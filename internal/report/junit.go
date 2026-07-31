@@ -11,8 +11,9 @@ import (
 )
 
 // JUnit renders the fault injection log as a JUnit XML test suite. Each
-// injection becomes a failing testcase named "<faultType> on <stubID>", so the
-// report reads as chaos evidence in CI dashboards: tests == injections.
+// injection becomes a failing testcase named by fault type, with the stub ID
+// in the classname, so the report reads as chaos evidence in CI dashboards:
+// tests == injections.
 func JUnit(entries []spec.FaultInjectionEntry, suiteName string) []byte {
 	type failure struct {
 		Message string `xml:"message,attr"`

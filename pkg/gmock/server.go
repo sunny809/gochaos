@@ -532,6 +532,10 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 				RequestPath:    r.URL.Path,
 				ActivationMode: spec.ActivationMode("rate_limit"),
 			})
+			// Record mode: remember the rate_limit fire so ExportTimeline can
+			// serialize it into a replayable artifact, tagged with the request's
+			// observed position.
+			s.timelineRecord.recordFire(r, fault, at)
 			return
 		}
 	}
