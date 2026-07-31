@@ -14,5 +14,11 @@ type JSONReport struct {
 
 // JSON renders the fault injection log as a JSON report envelope.
 func JSON(entries []spec.FaultInjectionEntry, suiteName string) ([]byte, error) {
+	// Normalize nil to an empty slice so the envelope renders "entries": []
+	// instead of "entries": null — script consumers do `.entries[]` and
+	// must always see an array.
+	if entries == nil {
+		entries = []spec.FaultInjectionEntry{}
+	}
 	return json.MarshalIndent(JSONReport{Suite: suiteName, Entries: entries}, "", "  ")
 }

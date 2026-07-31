@@ -57,6 +57,18 @@ func TestJUnitEmpty(t *testing.T) {
 	}
 }
 
+// TestJSONEmpty renders an empty entries array (never null) — script
+// consumers do `.entries[]` and must see an array.
+func TestJSONEmpty(t *testing.T) {
+	out, err := JSON(nil, "gmock-chaos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"entries": []`) {
+		t.Fatalf("expected empty entries array, got:\n%s", string(out))
+	}
+}
+
 // TestJSON renders the envelope with all entries.
 func TestJSON(t *testing.T) {
 	out, err := JSON(sampleEntries(), "gmock-chaos")
