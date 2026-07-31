@@ -149,6 +149,35 @@ func (e *eventState) shouldFire(elapsedMs int64) bool {
 	return elapsedMs >= e.def.At.TimeMs
 }
 
+// Export assembles a FaultTimeline artifact from the events that actually
+// fired (spec §4). Only fired events are included; time-keyed triggers are
+// converted to request-keyed triggers using the counter value at fire time,
+// and consecutive fires collapse into a single at/until window.
+func (r *Runner) Export() *spec.FaultTimeline {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	tl := &spec.FaultTimeline{Version: 1, Name: r.name}
+	for _, e := range r.events {
+		if len(e.fired) == 0 {
+			continue
+		}
+		at := &spec.TimelineTrigger{Request: e.fired[0]}
+		var until *spec.TimelineTrigger
+		if last := e.fired[len(e.fired)-1]; last > e.fired[0] {
+			until = &spec.TimelineTrigger{Request: last}
+		}
+		tl.Events = append(tl.Events, spec.TimelineEvent{
+			At:    at,
+			Until: until,
+			Match: e.def.Match,
+			Fault: e.def.Fault,
+			Delay: e.def.Delay,
+		})
+	}
+	return tl
+}
+
 // Validate checks a FaultTimeline against the artifact rules (spec §2).
 func Validate(tl *spec.FaultTimeline) error {
 	if tl == nil {
