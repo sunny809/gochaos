@@ -38,6 +38,7 @@ Examples:
 	cmd.AddCommand(newStubCmd())
 	cmd.AddCommand(newResetCmd())
 	cmd.AddCommand(newRequestsCmd())
+	cmd.AddCommand(newReportCmd())
 
 	return cmd
 }

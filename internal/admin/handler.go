@@ -23,6 +23,7 @@
 //	GET    /__admin/health/live           Liveness probe (K8s)
 //	GET    /__admin/health/ready          Readiness probe (K8s)
 //	GET    /__admin/metrics               Server metrics (expvar counters)
+//	GET    /__admin/report                Export chaos evidence (JUnit XML or JSON)
 package admin
 
 import (
@@ -50,7 +51,7 @@ type Handler struct {
 	callbackLog    *callbacklog.Log
 	nearMissEngine *nearmiss.Engine
 	metrics        MetricsProvider
-	resetFns       []func() // additional reset hooks (scenarios, proxy, etc.)
+	resetFns       []func()    // additional reset hooks (scenarios, proxy, etc.)
 	shuttingDown   atomic.Bool // set to true when the server is shutting down (for readiness probe)
 }
 
@@ -223,6 +224,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.metrics.Add("admin_operations", 1)
 		}
 		h.metricsHandler(w, r)
+
+	case path == Prefix+"report":
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		h.reportHandler(w, r)
 
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{
