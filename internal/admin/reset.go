@@ -11,6 +11,7 @@ func (h *Handler) reset(w http.ResponseWriter, r *http.Request) {
 	h.registry.DeleteAll()
 	h.requestLog.Clear()
 	h.faultLog.Clear()
+	h.callbackLog.Clear()
 
 	for _, fn := range h.resetFns {
 		fn()

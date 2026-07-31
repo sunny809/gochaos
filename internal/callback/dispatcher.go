@@ -13,12 +13,14 @@ package callback
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"text/template"
 	"time"
 
@@ -29,9 +31,14 @@ import (
 // other reserved IP ranges that callbacks must never reach. DNS resolution at
 // dispatch time prevents TOCTOU attacks where a domain resolves to a public IP
 // at registration time but to a private IP at dispatch time.
-var blockedCIDRs []*net.IPNet
+var (
+	blockedCIDRs   []*net.IPNet
+	parseCIDRsOnce sync.Once
+)
 
-func init() {
+// initBlockedCIDRs populates the blockedCIDRs slice. Called lazily via sync.Once
+// on the first call to IsBlockedIP, avoiding init() per project convention.
+func initBlockedCIDRs() {
 	networks := []string{
 		"127.0.0.0/8",    // loopback
 		"10.0.0.0/8",     // RFC 1918
@@ -55,6 +62,7 @@ func init() {
 // IsBlockedIP returns true if the IP falls within any blocked CIDR range.
 // Exported for testing.
 func IsBlockedIP(ip net.IP) bool {
+	parseCIDRsOnce.Do(initBlockedCIDRs)
 	for _, cidr := range blockedCIDRs {
 		if cidr.Contains(ip) {
 			return true
@@ -101,9 +109,11 @@ type Dispatcher struct {
 	logger         *slog.Logger
 	callbackLog    CallbackRecorder
 	wg             sync.WaitGroup
+	templateCache  sync.Map
+	templateCount  atomic.Int32 // tracks cache size for bounded growth
 	defaultTimeout time.Duration
 	enabled        bool
-	ssrfBypass     bool // when true, skip SSRF checks (for testing only)
+	ssrfBypass     atomic.Bool // when true, skip SSRF checks (for testing only)
 }
 
 // NewDispatcher creates a callback dispatcher with the given configuration.
@@ -125,7 +135,7 @@ func NewDispatcher(logger *slog.Logger, callbackLog CallbackRecorder, defaultTim
 // SetSSRFBypass enables or disables SSRF protection. When bypass is true, the
 // dispatcher skips IP-based SSRF checks. This should ONLY be used in tests.
 func (d *Dispatcher) SetSSRFBypass(bypass bool) {
-	d.ssrfBypass = bypass
+	d.ssrfBypass.Store(bypass)
 }
 
 // Dispatch fires a callback asynchronously after the mock response has been
@@ -150,7 +160,9 @@ func (d *Dispatcher) Dispatch(callback *spec.CallbackDefinition, stubID string, 
 }
 
 // WaitInFlight waits for all in-flight callback goroutines to complete or
-// until the context is cancelled.
+// until the context is cancelled. Calling WaitInFlight multiple times is safe
+// (subsequent calls with a live context return almost immediately when the wg
+// counter reaches zero).
 func (d *Dispatcher) WaitInFlight(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {
@@ -161,6 +173,9 @@ func (d *Dispatcher) WaitInFlight(ctx context.Context) {
 	select {
 	case <-done:
 	case <-ctx.Done():
+		// The goroutine above will remain blocked until all in-flight
+		// callbacks complete (bounded by per-callback timeout), then exit.
+		// Since the caller is shutting down, no new callbacks are dispatched.
 		d.logger.Warn("callback shutdown: some in-flight callbacks did not complete", "error", ctx.Err())
 	}
 }
@@ -207,7 +222,7 @@ func (d *Dispatcher) dispatchSync(callback *spec.CallbackDefinition, stubID stri
 	}
 
 	host := parsedURL.Hostname()
-	if !d.ssrfBypass && IsBlockedHost(host) {
+	if !d.ssrfBypass.Load() && IsBlockedHost(host) {
 		entry.Status = spec.CallbackSSRFBlocked
 		entry.Error = fmt.Sprintf("callback target %q resolves to blocked IP range", host)
 		d.callbackLog.Record(entry)
@@ -277,6 +292,9 @@ func (d *Dispatcher) dispatchSync(callback *spec.CallbackDefinition, stubID stri
 		d.callbackLog.Record(entry)
 		return
 	}
+	// Drain the response body before closing to allow HTTP connection reuse.
+	// Limit drain to 1KB to prevent unbounded memory usage from large responses.
+	_, _ = io.CopyN(io.Discard, resp.Body, 1024)
 	resp.Body.Close()
 
 	entry.Status = spec.CallbackDelivered
@@ -290,11 +308,27 @@ func (d *Dispatcher) dispatchSync(callback *spec.CallbackDefinition, stubID stri
 	)
 }
 
-// renderTemplate renders a text/template with the request context.
+// renderTemplate renders a text/template with the request context, caching
+// parsed templates by their source text for efficiency.
 func (d *Dispatcher) renderTemplate(tmplText string, ctx RequestContext) (string, error) {
+	// Check cache first
+	if cached, ok := d.templateCache.Load(tmplText); ok {
+		tmpl := cached.(*template.Template)
+		var buf strings.Builder
+		if err := tmpl.Execute(&buf, ctx); err != nil {
+			return "", fmt.Errorf("template execute error: %w", err)
+		}
+		return buf.String(), nil
+	}
+
 	tmpl, err := template.New("callback").Parse(tmplText)
 	if err != nil {
 		return "", fmt.Errorf("template parse error: %w", err)
+	}
+	// Limit cache size to prevent unbounded growth (max 100 entries).
+	if d.templateCount.Load() < 100 {
+		d.templateCache.Store(tmplText, tmpl)
+		d.templateCount.Add(1)
 	}
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, ctx); err != nil {

@@ -473,7 +473,7 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-		s.metrics.requestsMatched.Add(1)
+	s.metrics.requestsMatched.Add(1)
 	// Increment the stub's hit count before writing the response.
 	// The returned value is the new count after increment; this is passed
 	// to WriteResponse so that the everyNthRequest activation mode (A2)
@@ -523,17 +523,17 @@ func (s *mockServer) serveMock(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-		// Dispatch async callback (fire-and-forget)
-		if result.Stub.Response.Callback != nil {
-			s.callbackDisp.Dispatch(result.Stub.Response.Callback, result.Stub.ID, callback.RequestContext{
-				Method:      r.Method,
-				Path:        r.URL.Path,
-				QueryString: r.URL.RawQuery,
-				Headers:     headersToMap(r.Header),
-				Body:        readBodyForCallback(r),
-			})
-		}
+	// Dispatch async callback (fire-and-forget)
+	if result.Stub.Response.Callback != nil {
+		s.callbackDisp.Dispatch(result.Stub.Response.Callback, result.Stub.ID, callback.RequestContext{
+			Method:      r.Method,
+			Path:        r.URL.Path,
+			QueryString: r.URL.RawQuery,
+			Headers:     headersToMap(r.Header),
+			Body:        readBodyForCallback(r),
+		})
 	}
+}
 
 // writeRateLimited writes a rate-limit response when the token bucket is empty.
 // The status code defaults to 429 (Too Many Requests) unless RateLimitStatus
