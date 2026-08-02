@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sunny809/gochaos/pkg/gmock"
+	"github.com/sunny809/gochaos/test/testutil"
 )
 
 // noMatchResponse mirrors the on-the-wire 404 body emitted by writeNoMatch in
@@ -24,18 +25,6 @@ type noMatchResponse struct {
 		MaxScore      int    `json:"maxScore"`
 		TopMissReason string `json:"topMissReason"`
 	} `json:"nearMisses"`
-}
-
-// startMockServer starts a gmock server on a random port and registers the
-// supplied cleanup function with t.Cleanup.
-func startMockServer(t *testing.T) gmock.Server {
-	t.Helper()
-	srv := gmock.NewServer(gmock.WithPort(0))
-	if err := srv.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(func() { _ = srv.Stop() })
-	return srv
 }
 
 // readNoMatchBody decodes the 404 body and asserts the basic contract:
@@ -60,7 +49,7 @@ func readNoMatchBody(t *testing.T, resp *http.Response) noMatchResponse {
 }
 
 func TestStubDeleteNotFound(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 	deleted := srv.DeleteStub("nonexistent-id")
 	if deleted {
 		t.Error("expected DeleteStub to return false for unknown ID")
@@ -68,7 +57,7 @@ func TestStubDeleteNotFound(t *testing.T) {
 }
 
 func TestClearStubs(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 	srv.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/test"},
 		Response: gmock.ResponseDefinition{Status: http.StatusOK},
@@ -88,7 +77,7 @@ func TestClearStubs(t *testing.T) {
 }
 
 func TestReset(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 	srv.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/test"},
 		Response: gmock.ResponseDefinition{Status: http.StatusOK},
@@ -115,7 +104,7 @@ func TestReset(t *testing.T) {
 }
 
 func TestStubJSON(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 	jsonData := []byte(`{"request":{"method":"GET","urlPath":"/json-stub"},"response":{"status":200,"body":"from-json"}}`)
 
 	id, err := srv.StubJSON(jsonData)
@@ -146,7 +135,7 @@ func TestStubJSON(t *testing.T) {
 }
 
 func TestStubJSONInvalid(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 	jsonData := []byte(`not valid json`)
 
 	id, err := srv.StubJSON(jsonData)
@@ -159,7 +148,7 @@ func TestStubJSONInvalid(t *testing.T) {
 }
 
 func TestRequestLog(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 	srv.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/test"},
 		Response: gmock.ResponseDefinition{Status: http.StatusOK},
@@ -178,7 +167,7 @@ func TestRequestLog(t *testing.T) {
 }
 
 func TestUnmatchedRequests(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 
 	resp, err := http.Get(srv.URL() + "/no-match")
 	if err != nil {
@@ -195,7 +184,7 @@ func TestUnmatchedRequests(t *testing.T) {
 	}
 }
 func TestWriteNoMatch_IncludesNearMiss(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 
 	// Register a single stub that the test request will not match.
 	srv.Stub(gmock.StubDefinition{
@@ -248,7 +237,7 @@ func TestWriteNoMatch_IncludesNearMiss(t *testing.T) {
 // nearMisses field is an empty (non-nil) array, NOT null and NOT missing.
 // Clients should be able to decode and iterate over it unconditionally.
 func TestWriteNoMatch_EmptyRegistry(t *testing.T) {
-	srv := startMockServer(t)
+	srv := testutil.StartServer(t)
 
 	resp, err := http.Get(srv.URL() + "/no/such/path")
 	if err != nil {

@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/sunny809/gochaos/pkg/gmock"
+	"github.com/sunny809/gochaos/test/testutil"
 	"gopkg.in/yaml.v3"
 )
 
 // TestTimelineIndexSequence fires a declared timeline exactly on schedule,
 // and the injections are visible to VerifyFaultsInjected.
 func TestTimelineIndexSequence(t *testing.T) {
-	server, stop := startServer(t)
-	defer stop()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/payments"},
@@ -78,7 +78,7 @@ func TestTimelineExportReplayClosedLoop(t *testing.T) {
 	}
 
 	// Run 1: probabilistic chaos with a seed.
-	serverA, stopA := startServer(t, gmock.WithRandSeed(42))
+	serverA := testutil.StartServer(t, gmock.WithRandSeed(42))
 	serverA.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/faulty"},
 		Response: gmock.ResponseDefinition{
@@ -99,11 +99,9 @@ func TestTimelineExportReplayClosedLoop(t *testing.T) {
 	if len(tl.Events) == 0 {
 		t.Fatal("expected exported timeline to contain fired events")
 	}
-	stopA()
 
 	// Run 2: replay the recorded timeline with a fresh, fault-free stub.
-	serverB, stopB := startServer(t)
-	defer stopB()
+	serverB := testutil.StartServer(t)
 	serverB.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/faulty"},
 		Response: gmock.ResponseDefinition{
@@ -127,8 +125,7 @@ func TestTimelineExportReplayClosedLoop(t *testing.T) {
 // recorded, so the exported artifact contains a rate_limit event at the
 // trigger position of the rate-limited request.
 func TestTimelineRateLimitRecorded(t *testing.T) {
-	server, stop := startServer(t)
-	defer stop()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/burst"},
@@ -201,7 +198,7 @@ func TestTimelineRateLimitReplayReproduces429s(t *testing.T) {
 
 	// Run 1: record. Tight loop so the token bucket cannot refill between
 	// requests: 1-2 warm-up, 3-4 consume the initial tokens, 5+ are limited.
-	serverA, stopA := startServer(t)
+	serverA := testutil.StartServer(t)
 	serverA.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/burst"},
 		Response: gmock.ResponseDefinition{
@@ -222,30 +219,24 @@ func TestTimelineRateLimitReplayReproduces429s(t *testing.T) {
 		}
 	}
 	if limited == 0 {
-		stopA()
 		t.Fatal("run A: expected at least one rate-limited request")
 	}
 
 	tl, err := serverA.ExportTimeline()
 	if err != nil {
-		stopA()
 		t.Fatalf("export: %v", err)
 	}
 	if len(tl.Events) == 0 {
-		stopA()
 		t.Fatal("expected exported timeline to contain fired events")
 	}
 	data, err := yaml.Marshal(tl)
 	if err != nil {
-		stopA()
 		t.Fatalf("marshal: %v", err)
 	}
-	stopA()
 
 	// Run 2: replay the artifact into a fresh, fault-free server. The 429s
 	// must come from the timeline events only.
-	serverB, stopB := startServer(t)
-	defer stopB()
+	serverB := testutil.StartServer(t)
 	serverB.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/burst"},
 		Response: gmock.ResponseDefinition{
@@ -270,8 +261,7 @@ func TestTimelineRateLimitReplayReproduces429s(t *testing.T) {
 // lands in the fault log as a timeline injection. Pins the declare path,
 // which previously went through the rate_limit no-op in WriteResponse.
 func TestTimelineRateLimitDeclaredFires(t *testing.T) {
-	server, stop := startServer(t)
-	defer stop()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/declared"},
@@ -316,8 +306,7 @@ events:
 // carries the event's effect, so the client sees the injection (500), not a
 // 404 near-miss response.
 func TestTimelineUnmatchedRequestStillInjected(t *testing.T) {
-	server, stop := startServer(t)
-	defer stop()
+	server := testutil.StartServer(t)
 
 	// No stub for /api/ghost: the only response comes from the timeline.
 	if err := server.LoadTimelineYAML([]byte(`
@@ -357,8 +346,7 @@ func TestTimelineFiredEventDispatchesCallback(t *testing.T) {
 	}))
 	defer target.Close()
 
-	server, stop := startServer(t, gmock.WithCallbackSSRFBypass())
-	defer stop()
+	server := testutil.StartServer(t, gmock.WithCallbackSSRFBypass())
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/webhook"},
@@ -409,8 +397,7 @@ events:
 // start; after Reset re-baselines the epoch, the same event fires again —
 // time-keyed triggers are not permanently dead after reset.
 func TestTimelineTimeZeroRefiresAfterReset(t *testing.T) {
-	server, stop := startServer(t)
-	defer stop()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/armed"},
@@ -465,8 +452,7 @@ events:
 // still lands in the fault log as a "delay" entry, so chaos reports cover
 // every injection — delays included.
 func TestStubDelayOnlyAppearsInFaultLog(t *testing.T) {
-	server, stop := startServer(t)
-	defer stop()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/lag"},
@@ -506,7 +492,7 @@ func TestTimelineYAMLRoundTrip(t *testing.T) {
 	}
 
 	// Run 1: probabilistic chaos with a seed.
-	serverA, stopA := startServer(t, gmock.WithRandSeed(42))
+	serverA := testutil.StartServer(t, gmock.WithRandSeed(42))
 	serverA.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/rt"},
 		Response: gmock.ResponseDefinition{
@@ -527,7 +513,6 @@ func TestTimelineYAMLRoundTrip(t *testing.T) {
 	if len(tl.Events) == 0 {
 		t.Fatal("expected exported timeline to contain fired events")
 	}
-	stopA()
 
 	data, err := yaml.Marshal(tl)
 	if err != nil {
@@ -535,8 +520,7 @@ func TestTimelineYAMLRoundTrip(t *testing.T) {
 	}
 
 	// Run 2: replay the YAML artifact with a fresh, fault-free stub.
-	serverB, stopB := startServer(t)
-	defer stopB()
+	serverB := testutil.StartServer(t)
 	serverB.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/rt"},
 		Response: gmock.ResponseDefinition{
@@ -559,8 +543,7 @@ func TestTimelineYAMLRoundTrip(t *testing.T) {
 // TestTimelineDelayEventIsRecorded: delay-only events appear in the fault log
 // as FaultType "delay" with DelayMs set.
 func TestTimelineDelayEventIsRecorded(t *testing.T) {
-	server, stop := startServer(t)
-	defer stop()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/api/slow"},

@@ -610,7 +610,8 @@ func TestCopyMap(t *testing.T) {
 // V1-T5: Integration tests (real server)
 // ---------------------------------------------------------------------------
 
-// startTestServer is a helper to start a gmock server on a random port.
+// startTestServer starts a gmock server on a random port. This file is
+// package gmock (internal), so it cannot import test/testutil (import cycle).
 func startTestServer(t *testing.T) Server {
 	t.Helper()
 	server := NewServer(WithPort(0))

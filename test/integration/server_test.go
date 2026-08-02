@@ -12,34 +12,11 @@ import (
 	"time"
 
 	"github.com/sunny809/gochaos/pkg/gmock"
+	"github.com/sunny809/gochaos/test/testutil"
 )
 
-// startServer starts a gmock server on a random port for testing.
-// Returns the server and a cleanup function.
-func startServer(t *testing.T, opts ...gmock.Option) (gmock.Server, func()) {
-	t.Helper()
-
-	// Always use random port (0) for tests
-	opts = append([]gmock.Option{gmock.WithPort(0)}, opts...)
-	server := gmock.NewServer(opts...)
-
-	if err := server.Start(); err != nil {
-		t.Fatalf("failed to start server: %v", err)
-	}
-
-	// Give the server a moment to bind
-	time.Sleep(10 * time.Millisecond)
-
-	return server, func() {
-		if err := server.Stop(); err != nil {
-			t.Logf("server stop error: %v", err)
-		}
-	}
-}
-
 func TestServerStubMatch(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// Register a stub via the library API
 	id := server.Stub(gmock.StubDefinition{
@@ -78,8 +55,7 @@ func TestServerStubMatch(t *testing.T) {
 }
 
 func TestServerNoMatch(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// No stubs registered; expect 404 with diagnostic body
 	resp, err := http.Get(server.URL() + "/unknown")
@@ -107,8 +83,7 @@ func TestServerNoMatch(t *testing.T) {
 }
 
 func TestAdminCreateAndListMappings(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// Create a stub via admin API
 	stubJSON := []byte(`{
@@ -176,8 +151,7 @@ func TestAdminCreateAndListMappings(t *testing.T) {
 }
 
 func TestAdminDeleteMapping(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	id := server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: "GET", URLPath: "/test"},
@@ -211,8 +185,7 @@ func TestAdminDeleteMapping(t *testing.T) {
 }
 
 func TestAdminReset(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: "GET", URLPath: "/a"},
@@ -249,8 +222,7 @@ func TestAdminReset(t *testing.T) {
 }
 
 func TestRequestLog(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: "GET", URLPath: "/match"},
@@ -276,8 +248,7 @@ func TestRequestLog(t *testing.T) {
 }
 
 func TestAdminListRequests(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: "GET", URLPath: "/a"},
@@ -317,8 +288,7 @@ func TestAdminListRequests(t *testing.T) {
 }
 
 func TestVerify(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: "POST", URLPath: "/events"},
@@ -361,8 +331,7 @@ func TestVerify(t *testing.T) {
 }
 
 func TestPriorityOrdering(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// More general (lower priority = higher precedence)
 	server.Stub(gmock.StubDefinition{
@@ -412,8 +381,7 @@ func TestPriorityOrdering(t *testing.T) {
 }
 
 func TestSeparateAdminPort(t *testing.T) {
-	server, cleanup := startServer(t, gmock.WithAdminPort(0))
-	defer cleanup()
+	server := testutil.StartServer(t, gmock.WithAdminPort(0))
 	// Note: WithAdminPort(0) - the server should still pick a random port.
 	// But since WithAdminPort(0) is treated as "no separate port" (because of `> 0` check),
 	// this test exercises the same-port case. Let's instead verify URLs differ when set.
@@ -423,8 +391,7 @@ func TestSeparateAdminPort(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	resp, err := http.Get(server.AdminURL() + "/__admin/health")
 	if err != nil {
@@ -446,8 +413,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestRecordRequestBody(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -470,8 +436,7 @@ func TestRecordRequestBody(t *testing.T) {
 }
 
 func TestResponseDelay(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -505,8 +470,7 @@ func TestResponseDelay(t *testing.T) {
 }
 
 func TestBase64Body(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// "hello world" in base64
 	server.Stub(gmock.StubDefinition{
@@ -533,8 +497,7 @@ func TestBase64Body(t *testing.T) {
 }
 
 func TestRedirectStub(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -565,8 +528,7 @@ func TestRedirectStub(t *testing.T) {
 }
 
 func TestCORSEnabled(t *testing.T) {
-	server, cleanup := startServer(t, gmock.WithCORSEnabled())
-	defer cleanup()
+	server := testutil.StartServer(t, gmock.WithCORSEnabled())
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -620,8 +582,7 @@ func TestCORSEnabled(t *testing.T) {
 }
 
 func TestCookieMatching(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -675,8 +636,7 @@ func TestCookieMatching(t *testing.T) {
 }
 
 func TestAcceptHeaderMatching(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -736,8 +696,7 @@ func TestAcceptHeaderMatching(t *testing.T) {
 }
 
 func TestGzipCompression(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -792,8 +751,7 @@ func TestGzipCompression(t *testing.T) {
 // --- F5: Fault Injection Integration Tests ---
 
 func TestErrorFault(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -840,8 +798,7 @@ func TestErrorFault(t *testing.T) {
 }
 
 func TestEmptyFault(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -883,8 +840,7 @@ func TestEmptyFault(t *testing.T) {
 }
 
 func TestConnectionResetFault(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -921,8 +877,7 @@ func TestConnectionResetFault(t *testing.T) {
 }
 
 func TestFaultViaAdminAPI(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// Create a fault stub via the admin API
 	stubJSON := []byte(`{
@@ -992,8 +947,7 @@ func TestFaultViaAdminAPI(t *testing.T) {
 }
 
 func TestFaultWithDelay(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -1105,8 +1059,7 @@ func postNearMissAdmin(t *testing.T, adminURL, method, path string, headers map[
 }
 
 func TestNearMiss_MethodMismatch(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Name:     "create-user",
@@ -1144,8 +1097,7 @@ func TestNearMiss_MethodMismatch(t *testing.T) {
 }
 
 func TestNearMiss_PathMismatch(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Name:     "list-users",
@@ -1174,8 +1126,7 @@ func TestNearMiss_PathMismatch(t *testing.T) {
 }
 
 func TestNearMiss_HeaderMismatch(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Name: "auth-required",
@@ -1208,8 +1159,7 @@ func TestNearMiss_HeaderMismatch(t *testing.T) {
 }
 
 func TestNearMiss_BodyMismatch(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Name: "exact-body",
@@ -1242,8 +1192,7 @@ func TestNearMiss_BodyMismatch(t *testing.T) {
 }
 
 func TestNearMiss_MultipleCandidates(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// Register 3 stubs that all match on GET but differ in path.
 	server.Stub(gmock.StubDefinition{
@@ -1278,8 +1227,7 @@ func TestNearMiss_MultipleCandidates(t *testing.T) {
 }
 
 func TestNearMiss_TopNLimit(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// Register 8 stubs. The default engine topN is 5.
 	for i := 0; i < 8; i++ {
@@ -1301,8 +1249,7 @@ func TestNearMiss_TopNLimit(t *testing.T) {
 }
 
 func TestNearMiss_ExactMatchOmitted(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Name:     "exact-stub",
@@ -1323,8 +1270,7 @@ func TestNearMiss_ExactMatchOmitted(t *testing.T) {
 }
 
 func TestNearMiss_404ResponseIncludesNearMiss(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	// Register a stub that will nearly match.
 	server.Stub(gmock.StubDefinition{
@@ -1382,8 +1328,7 @@ func TestNearMiss_404ResponseIncludesNearMiss(t *testing.T) {
 }
 
 func TestNearMiss_AdminEndpoint_BadRequests(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	t.Run("missing path", func(t *testing.T) {
 		resp, err := http.Post(server.AdminURL()+"/__admin/nearmiss", "application/json",
@@ -1426,8 +1371,7 @@ func TestNearMiss_AdminEndpoint_BadRequests(t *testing.T) {
 }
 
 func TestFaultNoGzip(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -1464,8 +1408,7 @@ func TestFaultNoGzip(t *testing.T) {
 }
 
 func TestRateLimit_Default429(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -1518,8 +1461,7 @@ func TestRateLimit_Default429(t *testing.T) {
 }
 
 func TestRateLimit_CustomStatus(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
@@ -1559,8 +1501,7 @@ func TestRateLimit_CustomStatus(t *testing.T) {
 }
 
 func TestRateLimit_AfterRequests(t *testing.T) {
-	server, cleanup := startServer(t)
-	defer cleanup()
+	server := testutil.StartServer(t)
 
 	server.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{

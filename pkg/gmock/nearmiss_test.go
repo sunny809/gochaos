@@ -7,24 +7,11 @@ import (
 	"testing"
 
 	"github.com/sunny809/gochaos/pkg/gmock"
+	"github.com/sunny809/gochaos/test/testutil"
 )
 
-// newServerForNearMiss returns a started server (random port) and a cleanup func.
-// We start the server because it's the documented public path for using gmock,
-// even though NearMiss itself does not require Start. This mirrors verification
-// tests in this package.
-func newServerForNearMiss(t *testing.T) gmock.Server {
-	t.Helper()
-	srv := gmock.NewServer(gmock.WithPort(0))
-	if err := srv.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(func() { _ = srv.Stop() })
-	return srv
-}
-
 func TestNearMiss_NoStubsRegistered_ReturnsEmptyNonNil(t *testing.T) {
-	srv := newServerForNearMiss(t)
+	srv := testutil.StartServer(t)
 
 	got := srv.NearMiss(http.MethodGet, "/anything", nil, "")
 	if got == nil {
@@ -36,7 +23,7 @@ func TestNearMiss_NoStubsRegistered_ReturnsEmptyNonNil(t *testing.T) {
 }
 
 func TestNearMiss_ExactMatch_ReturnsEmptyNonNil(t *testing.T) {
-	srv := newServerForNearMiss(t)
+	srv := testutil.StartServer(t)
 	srv.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
 			Method:  http.MethodGet,
@@ -55,7 +42,7 @@ func TestNearMiss_ExactMatch_ReturnsEmptyNonNil(t *testing.T) {
 }
 
 func TestNearMiss_OrderingAndDiagnostics(t *testing.T) {
-	srv := newServerForNearMiss(t)
+	srv := testutil.StartServer(t)
 
 	// Stub A: matches method+path but expects header "X-Token: secret".
 	// Will produce 1 unmatched dimension (header) -> high partial score.
@@ -107,7 +94,7 @@ func TestNearMiss_OrderingAndDiagnostics(t *testing.T) {
 }
 
 func TestNearMiss_TopNDefaultTruncation(t *testing.T) {
-	srv := newServerForNearMiss(t)
+	srv := testutil.StartServer(t)
 
 	// Register 7 distinctly-failing stubs; default topN is 5.
 	for i := 0; i < 7; i++ {
@@ -128,7 +115,7 @@ func TestNearMiss_TopNDefaultTruncation(t *testing.T) {
 }
 
 func TestNearMiss_DefaultMethodGET(t *testing.T) {
-	srv := newServerForNearMiss(t)
+	srv := testutil.StartServer(t)
 	srv.Stub(gmock.StubDefinition{
 		Request: gmock.RequestPattern{
 			Method:  http.MethodGet,
@@ -146,7 +133,7 @@ func TestNearMiss_DefaultMethodGET(t *testing.T) {
 }
 
 func TestNearMiss_MalformedPath_ReturnsEmptyNonNil(t *testing.T) {
-	srv := newServerForNearMiss(t)
+	srv := testutil.StartServer(t)
 	srv.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/x"},
 		Response: gmock.ResponseDefinition{Status: http.StatusOK},
@@ -182,7 +169,7 @@ func TestNearMiss_MalformedPath_ReturnsEmptyNonNil(t *testing.T) {
 }
 
 func TestNearMiss_EmptyPath_DoesNotPanic(t *testing.T) {
-	srv := newServerForNearMiss(t)
+	srv := testutil.StartServer(t)
 	srv.Stub(gmock.StubDefinition{
 		Request:  gmock.RequestPattern{Method: http.MethodGet, URLPath: "/x"},
 		Response: gmock.ResponseDefinition{Status: http.StatusOK},
@@ -200,7 +187,7 @@ func TestNearMiss_EmptyPath_DoesNotPanic(t *testing.T) {
 }
 
 func TestNearMiss_ConcurrentSmoke(t *testing.T) {
-	srv := newServerForNearMiss(t)
+	srv := testutil.StartServer(t)
 
 	// Seed a few stubs.
 	for i := 0; i < 3; i++ {

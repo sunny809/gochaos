@@ -7,17 +7,8 @@ import (
 	"testing"
 
 	"github.com/sunny809/gochaos/pkg/gmock"
+	"github.com/sunny809/gochaos/test/testutil"
 )
-
-// startBenchServer starts a gmock server on a random port for benchmarks.
-func startBenchServer(b *testing.B) gmock.Server {
-	server := gmock.NewServer(gmock.WithPort(0))
-	if err := server.Start(); err != nil {
-		b.Fatal(err)
-	}
-	b.Cleanup(func() { server.Stop() })
-	return server
-}
 
 // BenchmarkFullPipeline measures the end-to-end request matching + response
 // pipeline throughput. It registers 100 stubs, then sends concurrent requests
@@ -26,7 +17,7 @@ func startBenchServer(b *testing.B) gmock.Server {
 // Target: ≥10,000 req/sec on an 8-core machine.
 func BenchmarkFullPipeline(b *testing.B) {
 	// Register 100 stubs with varying paths
-	srv := startBenchServer(b)
+	srv := testutil.StartServer(b)
 	baseURL := srv.URL()
 
 	for i := range 100 {
@@ -89,7 +80,7 @@ func BenchmarkFullPipeline(b *testing.B) {
 // BenchmarkNoMatch measures throughput for unmatched requests (404 path).
 // This tests the near-miss computation overhead on every unmatched request.
 func BenchmarkNoMatch(b *testing.B) {
-	srv := startBenchServer(b)
+	srv := testutil.StartServer(b)
 	baseURL := srv.URL()
 
 	// Register 100 stubs (so near-miss has work to do)

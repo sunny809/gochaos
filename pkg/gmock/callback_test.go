@@ -11,6 +11,23 @@ import (
 	"time"
 )
 
+// waitUntil polls fn every 10ms until it returns true or the timeout elapses.
+// Local copy of test/testutil.Wait — this file is package gmock (internal)
+// and cannot import test/testutil due to the import cycle.
+func waitUntil(t testing.TB, desc string, timeout time.Duration, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if fn() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s (%v)", desc, timeout)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestCallbackDispatch(t *testing.T) {
 	// Start a target server to receive callbacks
 	var mu sync.Mutex
@@ -63,7 +80,11 @@ func TestCallbackDispatch(t *testing.T) {
 	}
 
 	// Wait for async callback
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, "callback dispatch", 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(receivedRequests) >= 1
+	})
 
 	// Verify callback was received
 	mu.Lock()
@@ -126,7 +147,9 @@ func TestCallbackVerify(t *testing.T) {
 	}
 
 	// Wait for callbacks
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, "callback dispatch", 2*time.Second, func() bool {
+		return srv.VerifyCallbacks(CallbackPattern{StubID: stubID}, 2).Matched
+	})
 
 	// Verify callbacks
 	result := srv.VerifyCallbacks(CallbackPattern{StubID: stubID}, 2)
@@ -170,7 +193,9 @@ func TestCallbackSSRFBlocked(t *testing.T) {
 	resp.Body.Close()
 
 	// Wait for callback dispatch
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, "SSRF-blocked callback", 2*time.Second, func() bool {
+		return srv.VerifyCallbacks(CallbackPattern{Status: "ssrf_blocked"}, 1).Matched
+	})
 
 	// Verify the callback was blocked
 	result := srv.VerifyCallbacks(CallbackPattern{Status: "ssrf_blocked"}, 1)
@@ -208,9 +233,9 @@ func TestCallbackDisabled(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify the callback was logged as disabled
+	waitUntil(t, "disabled callback", 2*time.Second, func() bool {
+		return srv.VerifyCallbacks(CallbackPattern{Status: "disabled"}, 1).Matched
+	})
 	result := srv.VerifyCallbacks(CallbackPattern{Status: "disabled"}, 1)
 	if !result.Matched {
 		t.Errorf("expected disabled callback, got: %+v", result)
@@ -274,7 +299,9 @@ func TestCallbackAdminEndpoints(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, "callback dispatch", 2*time.Second, func() bool {
+		return srv.VerifyCallbacks(CallbackPattern{}, 1).Matched
+	})
 
 	// GET /__admin/callbacks
 	listResp, err := http.Get(srv.AdminURL() + "/__admin/callbacks")
@@ -360,7 +387,9 @@ func TestCallbackTimeout(t *testing.T) {
 	resp.Body.Close()
 
 	// Wait for callback to time out
-	time.Sleep(300 * time.Millisecond)
+	waitUntil(t, "timeout callback", 2*time.Second, func() bool {
+		return srv.VerifyCallbacks(CallbackPattern{Status: "timeout"}, 1).Matched
+	})
 
 	// Verify the callback was logged as timeout
 	result := srv.VerifyCallbacks(CallbackPattern{Status: "timeout"}, 1)
@@ -398,7 +427,9 @@ func TestCallbackReset(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, "callback dispatch", 2*time.Second, func() bool {
+		return srv.VerifyCallbacks(CallbackPattern{}, 1).Matched
+	})
 
 	// Verify callback was logged
 	before := srv.VerifyCallbacks(CallbackPattern{}, 1)

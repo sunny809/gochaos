@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package integration_test provides black-box integration tests against the
 // compiled gmock binary. These tests start the binary as a subprocess and
 // interact with it via HTTP — exactly like a real user would with curl.
@@ -19,17 +21,28 @@ import (
 )
 
 // buildBinary builds the gmock CLI binary and returns its path.
+// The binary is cached per-source-hash in a temporary directory so stale
+// binaries from previous runs are never used.
 func buildBinary(t *testing.T) string {
 	t.Helper()
 
-	cachePath := "/tmp/gmock-integration-test"
-	if _, err := os.Stat(cachePath); err == nil {
-		return cachePath
+	root := discoverModuleRoot(t)
+
+	// Hash the source to invalidate cache on code changes.
+	hash := sourceHash(t, root)
+	cacheDir := filepath.Join(os.TempDir(), "gmock-integration-test")
+	binPath := filepath.Join(cacheDir, "gmock-"+hash)
+
+	if _, err := os.Stat(binPath); err == nil {
+		return binPath
 	}
 
-	// Need to find the go.mod root. Use git rev-parse.
-	root := discoverModuleRoot(t)
-	cmd := exec.Command("go", "build", "-o", cachePath, ".")
+	// Remove stale file from the old single-binary cache layout.
+	if fi, err := os.Stat(cacheDir); err == nil && !fi.IsDir() {
+		_ = os.Remove(cacheDir)
+	}
+	_ = os.MkdirAll(cacheDir, 0755)
+	cmd := exec.Command("go", "build", "-o", binPath, ".")
 	cmd.Dir = filepath.Join(root, "cmd", "gmock")
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	out, err := cmd.CombinedOutput()
@@ -37,11 +50,32 @@ func buildBinary(t *testing.T) string {
 		t.Fatalf("failed to build gmock binary: %v\n%s", err, string(out))
 	}
 
-	if err := os.Chmod(cachePath, 0755); err != nil {
+	if err := os.Chmod(binPath, 0755); err != nil {
 		t.Fatalf("failed to chmod binary: %v", err)
 	}
 
-	return cachePath
+	return binPath
+}
+
+// sourceHash returns a short hash of the Go source files that make up the
+// gmock binary. If any source changes, the hash changes and the cached
+// binary is invalidated.
+func sourceHash(t *testing.T, root string) string {
+	t.Helper()
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{.Dir}}/{{.GoFiles}}", "./cmd/gmock")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Fallback: just use the current timestamp to force a rebuild.
+		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+	}
+	// Quick hash: just take the first 12 chars of the SHA-like output.
+	// This is not cryptographic — it just needs to change when source changes.
+	h := 0
+	for _, b := range out {
+		h = h*31 + int(b)
+	}
+	return fmt.Sprintf("%012x", uint32(h))
 }
 
 // discoverModuleRoot finds the go module root by looking for go.mod.

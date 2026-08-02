@@ -1,4 +1,4 @@
-.PHONY: build test test-race vet lint lint-all audit vulncheck coverage ci clean install help
+.PHONY: build test test-race test-unit test-integration test-all vet lint lint-all audit vulncheck coverage ci clean install help
 
 BINARY := gochaos
 MODULE := github.com/sunny809/gochaos
@@ -21,6 +21,15 @@ test-race: ## Run all tests with race detector
 
 test-verbose: ## Run all tests with verbose output
 	$(GO) test -race -v ./...
+
+test-unit: ## Run unit tests only (excludes binary integration tests)
+	$(GO) test -race ./...
+
+test-integration: ## Run binary integration tests only
+	$(GO) test -race -tags=integration ./test/integration/...
+
+test-all: ## Run all tests including binary integration
+	$(GO) test -race -tags=integration ./...
 
 vet: ## Run go vet (with shadow detection)
 	$(GO) vet -vettool=$(which shadow) ./... 2>/dev/null || $(GO) vet ./...
