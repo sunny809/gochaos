@@ -26,7 +26,7 @@ Scoring rules:
 - Regex match scores higher than wildcard (`*`)
 - Header match scores higher than absent-header check (`!`)
 - Each matching dimension contributes its score to the total
-- Priority field on the stub overrides the score-based ordering (lower priority value = higher precedence)
+- The stub with the highest total score wins; ties are broken by registry order (lower `priority` value first, then earlier registration)
 
 Interface:
 
@@ -43,7 +43,7 @@ type Matcher interface {
 - Enables precise "best match" selection when multiple stubs match
 - Provides foundation for near-miss diagnostics (Slice 10)
 - Scores are opaque integers — easy to extend with new matchers
-- Priority override allows users to force ordering when needed
+- Priority field breaks ties when multiple stubs have equal scores
 
 **Negative:**
 - Score design is somewhat arbitrary; changing weights is a breaking change

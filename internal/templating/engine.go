@@ -16,6 +16,10 @@ import (
 	"time"
 )
 
+// maxCacheSize bounds the template cache to prevent unbounded growth under
+// sustained use with many distinct response bodies.
+const maxCacheSize = 100
+
 // Engine renders stub response templates with request context.
 type Engine struct {
 	funcs template.FuncMap
@@ -23,27 +27,32 @@ type Engine struct {
 	cache map[string]*template.Template
 }
 
-// requestData exposes request fields to templates via method calls.
+// requestData exposes request fields to response templates via method calls.
+// In templates it is available as `{{.Request}}`, e.g. `{{.Request.Method}}`.
 type requestData struct {
 	req *http.Request
 }
 
-// Method returns the HTTP method of the request.
+// Method returns the HTTP method of the request (e.g. "GET", "POST").
+// Template usage: `{{.Request.Method}}`
 func (r *requestData) Method() string {
 	return r.req.Method
 }
 
-// Path returns the request URL path.
+// Path returns the request URL path (e.g. "/api/users").
+// Template usage: `{{.Request.Path}}`
 func (r *requestData) Path() string {
 	return r.req.URL.Path
 }
 
 // Header returns the first value of the named header, or an empty string.
+// Template usage: `{{.Request.Header "Authorization"}}`
 func (r *requestData) Header(name string) string {
 	return r.req.Header.Get(name)
 }
 
 // Query returns the first value of the named query parameter, or an empty string.
+// Template usage: `{{.Request.Query "page"}}`
 func (r *requestData) Query(key string) string {
 	return r.req.URL.Query().Get(key)
 }
@@ -95,7 +104,11 @@ func (e *Engine) Render(body string, req *http.Request) (string, error) {
 			e.mu.Unlock()
 			return "", fmt.Errorf("failed to parse template: %w", err)
 		}
-		e.cache[body] = tmpl
+		// Limit cache size to prevent unbounded growth. Once full, new
+		// templates are still parsed and used, just not cached.
+		if len(e.cache) < maxCacheSize {
+			e.cache[body] = tmpl
+		}
 	}
 	e.mu.Unlock()
 

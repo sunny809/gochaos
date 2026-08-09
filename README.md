@@ -206,7 +206,7 @@ Requires Go 1.22 or newer (uses the enhanced `net/http.ServeMux` pattern matchin
 
 ## Architecture Highlights
 
-- ADR-004: Sharded registry over global lock (performance-first)
+- ADR-004: Flat map + `sync.RWMutex` registry (not sharded — registry size is small)
 - ADR-003: Matcher returns `(bool, int)` — scoring for near-miss diagnostics
 - ADR-006: `text/template` over `html/template` (JSON escaping awareness)
 
@@ -355,17 +355,22 @@ server := gmock.NewServer(gmock.WithGzip(false))
 | `DELETE` | `/__admin/requests` | Clear request log |
 | `GET` | `/__admin/fault-log` | View fault injection log |
 | `DELETE` | `/__admin/fault-log` | Clear fault injection log |
+| `GET` | `/__admin/callbacks` | View callback dispatch events |
+| `DELETE` | `/__admin/callbacks` | Clear callback dispatch log |
 | `GET` | `/__admin/health` | Health check |
 | `GET` | `/__admin/health/live` | K8s liveness probe |
 | `GET` | `/__admin/health/ready` | K8s readiness probe |
 | `GET` | `/__admin/metrics` | Server metrics (8 counters) |
 | `POST` | `/__admin/nearmiss` | Near-miss diagnostics |
+| `GET` | `/__admin/report` | Export chaos evidence (JUnit XML or JSON) |
 
 ## Documentation
 
 | For | Document |
 |-----|----------|
 | 🚀 **Getting Started** | [Feature Overview](docs/features/getting-started.md) |
+| 🏗️ **Architecture** | [ARCHITECTURE.md](docs/ARCHITECTURE.md) — package structure, request flow, concurrency model |
+| 📋 **ADRs** | [docs/adrs/README.md](docs/adrs/README.md) — architecture decision records |
 | 📚 **Go Library API** | [docs/go-library-api.md](docs/go-library-api.md) — complete API reference |
 | 📖 **CLI Reference** | [docs/cli.md](docs/cli.md) — all commands and flags |
 | 🌐 **Admin API** | [docs/admin-api.md](docs/admin-api.md) — REST API with curl examples |
@@ -432,7 +437,7 @@ services:
 ## Features
 
 - Concurrent-safe stub registry with priority-ordered matching
-- 8-dimensional request matching (method, path, headers, query, body, cookies, accept)
+- 8-dimensional request matching (method, path exact, path regex, accept, headers, cookies, query, body)
 - Response templating with `text/template` (`{{.Request.Method}}`, `{{randomUUID}}`, `{{randomInt}}`, `{{now}}`)
 - **7 fault injection types**: `error` (500), `empty` (0-byte), `connection_reset` (TCP RST), `malformed` (invalid HTTP), `random_data` (garbage bytes + close), `slow_close` (delayed FIN), `rate_limit` (token bucket + 429/503)
 - **5 delay distributions**: `fixed`, `random`, `timeout` (infinite hang), `lognormal` (p50/p95/p99 parameterized), `dribble` (chunked body with inter-chunk delays)

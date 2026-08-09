@@ -1,6 +1,4 @@
-// Package admin — near-miss diagnostics endpoint.
-//
-// This file implements the HTTP surface for the N1 near-miss engine:
+// This file implements the HTTP surface for the near-miss engine:
 //
 //	POST /__admin/nearmiss
 //	Content-Type: application/json

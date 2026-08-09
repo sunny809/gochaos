@@ -1,5 +1,3 @@
-// Package admin implements the gmock admin REST API.
-//
 // This file contains health check endpoints for Kubernetes liveness and readiness probes.
 
 package admin

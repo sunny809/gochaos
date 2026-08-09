@@ -1,5 +1,3 @@
-// Package response provides the response writing port and adapters for the gmock server.
-//
 // This file implements fault injection validation for the response pipeline.
 // Fault types simulate network-level failures such as internal server errors,
 // empty responses, and connection resets.

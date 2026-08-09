@@ -1,7 +1,5 @@
-// Package response provides the response writing port and adapters for the gmock server.
-//
-// This package implements the hexagonal architecture pattern, separating the
-// concern of writing HTTP responses from the server lifecycle management.
+// This file defines the Writer interface and the public CORSOptions type used
+// to configure cross-origin request handling.
 package response
 
 import (

@@ -1,7 +1,7 @@
-// Package response provides the response writing port and adapters for the gmock server.
-//
-// This package implements the hexagonal architecture pattern, separating the
-// concern of writing HTTP responses from the server lifecycle management.
+// This file implements the HTTP response writer — the transport adapter that
+// writes matched stub responses (with optional delay/fault injection) to the
+// client. It handles gzip compression, binary bodies, and connection-level
+// faults like connection_reset and slow_close.
 package response
 
 import (

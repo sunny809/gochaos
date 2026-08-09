@@ -1,5 +1,3 @@
-// Package response provides the response writing port and adapters for the gmock server.
-//
 // This file implements the activation logic for fault injection. When a fault
 // has an Activation configuration, ShouldActivate determines whether the fault
 // should fire for the current request based on probability, request count, and
