@@ -1358,6 +1358,48 @@ func TestHTTPWriter_ApplyFault_ConcurrentSafety(t *testing.T) {
 	}
 }
 
+func TestGzipResponseWriter_WriteAndClose(t *testing.T) {
+	// Verify GzipResponseWriter.Write compresses data and Close flushes.
+	// These wrapper methods are exercised indirectly via WriteResponse but
+	// not covered because the existing tests go through .GW directly.
+	// This test ensures the wrappers themselves are correct.
+	var buf bytes.Buffer
+	gw := &GzipResponseWriter{
+		ResponseWriter: httptest.NewRecorder(),
+		GW:             gzip.NewWriter(&buf),
+	}
+
+	// Write should compress data through the gzip writer.
+	input := []byte("hello gzip world")
+	n, err := gw.Write(input)
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if n != len(input) {
+		t.Errorf("Write() = %d, want %d", n, len(input))
+	}
+
+	// Close flushes the gzip stream.
+	if err := gw.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Decompress and verify the payload.
+	reader, err := gzip.NewReader(&buf)
+	if err != nil {
+		t.Fatalf("gzip.NewReader error = %v", err)
+	}
+	defer reader.Close()
+
+	decompressed, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll error = %v", err)
+	}
+	if string(decompressed) != string(input) {
+		t.Errorf("decompressed = %q, want %q", string(decompressed), string(input))
+	}
+}
+
 func TestGzipResponseWriter_Unwrap(t *testing.T) {
 	inner := httptest.NewRecorder()
 	gw := &GzipResponseWriter{

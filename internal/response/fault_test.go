@@ -65,6 +65,114 @@ func TestValidFaultTypes(t *testing.T) {
 	}
 }
 
+func TestValidateDelay(t *testing.T) {
+	tests := []struct {
+		name    string
+		delay   *spec.DelayDefinition
+		wantErr bool
+	}{
+		{
+			name:    "nil delay is valid",
+			delay:   nil,
+			wantErr: false,
+		},
+		{
+			name:    "fixed delay is valid",
+			delay:   &spec.DelayDefinition{Type: "fixed", Value: 100},
+			wantErr: false,
+		},
+		{
+			name:    "random delay is valid",
+			delay:   &spec.DelayDefinition{Type: "random", Min: 50, Max: 200},
+			wantErr: false,
+		},
+		{
+			name:    "timeout delay is valid",
+			delay:   &spec.DelayDefinition{Type: "timeout"},
+			wantErr: false,
+		},
+		{
+			name:    "lognormal delay with p50 and p95 is valid",
+			delay:   &spec.DelayDefinition{Type: "lognormal", P50: 100, P95: 500},
+			wantErr: false,
+		},
+		{
+			name:    "lognormal delay with p50 and p99 is valid",
+			delay:   &spec.DelayDefinition{Type: "lognormal", P50: 100, P99: 1000},
+			wantErr: false,
+		},
+		{
+			name:    "lognormal delay with all percentiles is valid",
+			delay:   &spec.DelayDefinition{Type: "lognormal", P50: 100, P95: 500, P99: 1000},
+			wantErr: false,
+		},
+		{
+			name:    "dribble delay with chunks and totalDuration is valid",
+			delay:   &spec.DelayDefinition{Type: "dribble", Chunks: 5, TotalDuration: 500},
+			wantErr: false,
+		},
+		{
+			name:    "dribble delay with chunks and value is valid",
+			delay:   &spec.DelayDefinition{Type: "dribble", Chunks: 3, Value: 300},
+			wantErr: false,
+		},
+		{
+			name:    "unknown delay type is rejected",
+			delay:   &spec.DelayDefinition{Type: "fibonacci"},
+			wantErr: true,
+		},
+		{
+			name:    "empty delay type is rejected",
+			delay:   &spec.DelayDefinition{Type: ""},
+			wantErr: true,
+		},
+		{
+			name:    "dribble with chunks=0 is rejected",
+			delay:   &spec.DelayDefinition{Type: "dribble", Chunks: 0, TotalDuration: 500},
+			wantErr: true,
+		},
+		{
+			name:    "dribble with negative chunks is rejected",
+			delay:   &spec.DelayDefinition{Type: "dribble", Chunks: -1, TotalDuration: 500},
+			wantErr: true,
+		},
+		{
+			name:    "dribble with no duration is rejected",
+			delay:   &spec.DelayDefinition{Type: "dribble", Chunks: 5},
+			wantErr: true,
+		},
+		{
+			name:    "dribble with zero totalDuration and zero value is rejected",
+			delay:   &spec.DelayDefinition{Type: "dribble", Chunks: 5, TotalDuration: 0, Value: 0},
+			wantErr: true,
+		},
+		{
+			name:    "lognormal with p50=0 is rejected",
+			delay:   &spec.DelayDefinition{Type: "lognormal", P50: 0, P95: 500},
+			wantErr: true,
+		},
+		{
+			name:    "lognormal with no p95/p99 is rejected",
+			delay:   &spec.DelayDefinition{Type: "lognormal", P50: 100},
+			wantErr: true,
+		},
+		{
+			name:    "lognormal with p50=0 and no p95/p99 is rejected",
+			delay:   &spec.DelayDefinition{Type: "lognormal", P50: 0},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateDelay(tt.delay)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateDelay() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateFault(t *testing.T) {
 	t.Helper()
 

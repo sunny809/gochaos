@@ -632,6 +632,90 @@ func TestClearCallbacks(t *testing.T) {
 	}
 }
 
+func TestPrometheusEndpoint(t *testing.T) {
+	h, _, _ := setupTest()
+
+	req := httptest.NewRequest("GET", "/__admin/metrics/prometheus", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	got := w.Body.String()
+	if got != "# HELP test\n# TYPE test gauge\ntest 0\n" {
+		t.Errorf("unexpected prometheus output: %q", got)
+	}
+	// Content-Type must be text/plain with Prometheus version.
+	if ct := w.Header().Get("Content-Type"); ct != "text/plain; version=0.0.4" {
+		t.Errorf("Content-Type = %q, want text/plain; version=0.0.4", ct)
+	}
+}
+
+func TestPrometheusEndpointMethodNotAllowed(t *testing.T) {
+	h, _, _ := setupTest()
+
+	req := httptest.NewRequest("POST", "/__admin/metrics/prometheus", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestMetricsEndpointNilMetrics(t *testing.T) {
+	// When no MetricsProvider is configured, the metrics endpoint should
+	// return a 200 with a message rather than panicking on a nil interface.
+	registry := stub.NewRegistry()
+	requestLog := log.New(100)
+	faultLog := faultlog.NewFaultInjectionLog(100)
+	callbackLog := callbacklog.New(100)
+	engine := nearmiss.NewEngine()
+	h := New(registry, requestLog, faultLog, callbackLog, engine, nil) // nil metrics
+
+	req := httptest.NewRequest("GET", "/__admin/metrics", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if body["message"] != "metrics not initialized" {
+		t.Errorf("expected 'metrics not initialized', got %q", body["message"])
+	}
+}
+
+func TestPrometheusEndpointNilMetrics(t *testing.T) {
+	// When no MetricsProvider is configured, the prometheus endpoint should
+	// return an empty 200 with the correct Content-Type rather than panicking.
+	registry := stub.NewRegistry()
+	requestLog := log.New(100)
+	faultLog := faultlog.NewFaultInjectionLog(100)
+	callbackLog := callbacklog.New(100)
+	engine := nearmiss.NewEngine()
+	h := New(registry, requestLog, faultLog, callbackLog, engine, nil) // nil metrics
+
+	req := httptest.NewRequest("GET", "/__admin/metrics/prometheus", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/plain; version=0.0.4" {
+		t.Errorf("Content-Type = %q, want text/plain; version=0.0.4", ct)
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("expected empty body, got %q", w.Body.String())
+	}
+}
+
 func TestCallbacksMethodNotAllowed(t *testing.T) {
 	h, _, _ := setupTest()
 
