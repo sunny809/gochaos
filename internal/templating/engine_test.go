@@ -1,6 +1,7 @@
 package templating
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -295,6 +296,33 @@ func TestEngineCacheConcurrency(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestEngineCacheSizeBound(t *testing.T) {
+	// Verify the cache is bounded to maxCacheSize entries.
+	engine := NewEngine()
+
+	// Render maxCacheSize+20 unique templates.
+	for i := 0; i < maxCacheSize+20; i++ {
+		tmpl := fmt.Sprintf(`template-%d {{.Request.Method}}`, i)
+		req := buildRequest(t, http.MethodGet, "/", nil, nil)
+		got, err := engine.Render(tmpl, req)
+		if err != nil {
+			t.Fatalf("render %d: %v", i, err)
+		}
+		want := fmt.Sprintf("template-%d GET", i)
+		if got != want {
+			t.Errorf("render %d = %q, want %q", i, got, want)
+		}
+	}
+
+	// Cache should be capped at maxCacheSize.
+	engine.mu.RLock()
+	cacheLen := len(engine.cache)
+	engine.mu.RUnlock()
+	if cacheLen != maxCacheSize {
+		t.Errorf("cache size = %d, want %d (capped)", cacheLen, maxCacheSize)
+	}
 }
 
 // buildRequest creates an HTTP request for testing.
