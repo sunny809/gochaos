@@ -7,8 +7,8 @@ import (
 
 func TestIsBlockedIP(t *testing.T) {
 	tests := []struct {
-		name   string
-		ip     string
+		name    string
+		ip      string
 		blocked bool
 	}{
 		{"loopback IPv4", "127.0.0.1", true},

@@ -276,6 +276,7 @@ func (w *HTTPWriter) writeDribbleBody(rw http.ResponseWriter, resp spec.Response
 			end = bodyLen // last chunk gets the remainder
 		}
 
+		//nolint:gosec // G705 false positive: body is mock response content written to the mock server own ResponseWriter.
 		_, err := rw.Write([]byte(body[start:end]))
 		if err != nil {
 			return fmt.Errorf("dribble: failed to write chunk %d: %w", i, err)

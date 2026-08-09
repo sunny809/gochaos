@@ -127,46 +127,46 @@ func TestHeaderMatcher_Match(t *testing.T) {
 
 func TestCookieMatcher_Match(t *testing.T) {
 	tests := []struct {
-		name      string
-		cookie    string
-		pattern   string
+		name       string
+		cookie     string
+		pattern    string
 		reqCookies []*http.Cookie
-		want      bool
+		want       bool
 	}{
 		{
-			name:    "exact match",
-			cookie:  "session",
-			pattern: "abc123",
+			name:       "exact match",
+			cookie:     "session",
+			pattern:    "abc123",
 			reqCookies: []*http.Cookie{{Name: "session", Value: "abc123"}},
-			want:    true,
+			want:       true,
 		},
 		{
-			name:    "different value",
-			cookie:  "session",
-			pattern: "abc123",
+			name:       "different value",
+			cookie:     "session",
+			pattern:    "abc123",
 			reqCookies: []*http.Cookie{{Name: "session", Value: "xyz789"}},
-			want:    false,
+			want:       false,
 		},
 		{
-			name:      "missing cookie",
-			cookie:    "session",
-			pattern:   "abc123",
+			name:       "missing cookie",
+			cookie:     "session",
+			pattern:    "abc123",
 			reqCookies: []*http.Cookie{},
-			want:      false,
+			want:       false,
 		},
 		{
-			name:    "regex match",
-			cookie:  "session",
-			pattern: "~^[a-f0-9]+$",
+			name:       "regex match",
+			cookie:     "session",
+			pattern:    "~^[a-f0-9]+$",
 			reqCookies: []*http.Cookie{{Name: "session", Value: "abc123"}},
-			want:    true,
+			want:       true,
 		},
 		{
-			name:    "regex no match",
-			cookie:  "session",
-			pattern: "~^[0-9]+$",
+			name:       "regex no match",
+			cookie:     "session",
+			pattern:    "~^[0-9]+$",
 			reqCookies: []*http.Cookie{{Name: "session", Value: "abc"}},
-			want:    false,
+			want:       false,
 		},
 	}
 
@@ -312,10 +312,10 @@ func TestCompositeMatcher_Match_AndSemantics(t *testing.T) {
 	)
 
 	tests := []struct {
-		name    string
-		method  string
-		path    string
-		want    bool
+		name   string
+		method string
+		path   string
+		want   bool
 	}{
 		{"both match", "GET", "/api/users", true},
 		{"method mismatch", "POST", "/api/users", false},

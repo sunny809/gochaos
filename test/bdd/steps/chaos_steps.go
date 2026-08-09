@@ -1,12 +1,8 @@
 package steps
 
 import (
-	"crypto/tls"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/cucumber/godog"
 	"github.com/sunny809/gochaos/pkg/gmock"
@@ -138,19 +134,19 @@ func (tc *TestContext) aFixedDelay(ms string) error {
 
 // aRandomDelay stores a random delay config for the next fault stub.
 func (tc *TestContext) aRandomDelay(minStr, maxStr string) error {
-	min, err := parseInt(minStr)
+	minVal, err := parseInt(minStr)
 	if err != nil {
 		return fmt.Errorf("invalid min delay %q: %w", minStr, err)
 	}
-	max, err := parseInt(maxStr)
+	maxVal, err := parseInt(maxStr)
 	if err != nil {
 		return fmt.Errorf("invalid max delay %q: %w", maxStr, err)
 	}
 	tc.mu.Lock()
 	tc.pendingDelay = &gmock.DelayDefinition{
 		Type: "random",
-		Min:  min,
-		Max:  max,
+		Min:  minVal,
+		Max:  maxVal,
 	}
 	tc.mu.Unlock()
 	return nil
@@ -261,7 +257,7 @@ func (tc *TestContext) aStubWithEveryNthFault(nStr, faultType string) error {
 		return fmt.Errorf("invalid N %q: %w", nStr, err)
 	}
 	if n <= 0 {
-		return fmt.Errorf("N must be positive, got %d", n)
+		return fmt.Errorf("n must be positive, got %d", n)
 	}
 
 	tc.mu.Lock()
@@ -508,39 +504,4 @@ func (tc *TestContext) mapActivationMode(mode string) string {
 	default:
 		return mode
 	}
-}
-
-// ============================================================================
-// Helper methods for TCP-level fault observation
-// ============================================================================
-
-// sendAndExpectError sends a request expecting a connection-level error.
-func (tc *TestContext) sendAndExpectError(path string) error {
-	client := &http.Client{
-		Timeout: 2 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-	_, err := client.Get(tc.baseURL + path)
-	if err != nil {
-		return nil // expected — request failed due to fault
-	}
-	return fmt.Errorf("expected connection error for path %q but request succeeded", path)
-}
-
-// sendAndIgnoreError sends a request and ignores any connection errors.
-func (tc *TestContext) sendAndIgnoreError(path string) error {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(tc.baseURL + path)
-	if err != nil {
-		return nil // connection error is expected for some fault types
-	}
-	_, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-
-	tc.mu.Lock()
-	tc.response = resp
-	tc.mu.Unlock()
-	return nil
 }

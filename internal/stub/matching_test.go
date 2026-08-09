@@ -64,8 +64,8 @@ func TestBuildMatcher_InvalidCookieRegexSilentlyDropped(t *testing.T) {
 func TestBuildMatcher_InvalidQueryParamRegexSilentlyDropped(t *testing.T) {
 	def := spec.StubDefinition{
 		Request: spec.RequestPattern{
-			Method:     "GET",
-			URLPath:    "/test",
+			Method:      "GET",
+			URLPath:     "/test",
 			QueryParams: map[string]string{"filter": "~[invalid"},
 		},
 		Response: spec.ResponseDefinition{Status: 200},

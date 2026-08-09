@@ -79,36 +79,45 @@ func newStubCreateCmd() *cobra.Command {
 			}
 
 			for i, def := range stubs {
-				data, err := json.Marshal(def)
-				if err != nil {
-					return fmt.Errorf("stub %d: marshal: %w", i, err)
+				if err := postOneStub(cmd, i, def); err != nil {
+					return err
 				}
-				resp, err := commonClient.Post(
-					commonAdminURL+"/__admin/mappings",
-					"application/json",
-					bytes.NewReader(data))
-				if err != nil {
-					return fmt.Errorf("stub %d: post: %w", i, err)
-				}
-				body, err := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				if err != nil {
-					return fmt.Errorf("stub %d: read body: %w", i, err)
-				}
-
-				if resp.StatusCode >= 400 {
-					return fmt.Errorf("stub %d: server returned %d: %s", i, resp.StatusCode, string(body))
-				}
-
-				var created map[string]interface{}
-				if err := json.Unmarshal(body, &created); err != nil {
-					return fmt.Errorf("stub %d: unmarshal response: %w", i, err)
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "created stub: %v\n", created["id"])
 			}
 			return nil
 		},
 	}
+}
+
+// postOneStub marshals a single stub, POSTs it to the admin API, and prints
+// the created stub ID. Returns an error with stub index context.
+func postOneStub(cmd *cobra.Command, i int, def interface{}) error {
+	data, err := json.Marshal(def)
+	if err != nil {
+		return fmt.Errorf("stub %d: marshal: %w", i, err)
+	}
+	resp, err := commonClient.Post(
+		commonAdminURL+"/__admin/mappings",
+		"application/json",
+		bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("stub %d: post: %w", i, err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return fmt.Errorf("stub %d: read body: %w", i, err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("stub %d: server returned %d: %s", i, resp.StatusCode, string(body))
+	}
+
+	var created map[string]interface{}
+	if err := json.Unmarshal(body, &created); err != nil {
+		return fmt.Errorf("stub %d: unmarshal response: %w", i, err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "created stub: %v\n", created["id"])
+	return nil
 }
 
 func newStubGetCmd() *cobra.Command {

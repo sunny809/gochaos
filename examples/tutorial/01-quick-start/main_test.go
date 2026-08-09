@@ -77,4 +77,3 @@ func TestRetryOnIntermittentFailures(t *testing.T) {
 			result.ActualCount, result.Errors)
 	}
 }
-

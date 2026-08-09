@@ -19,34 +19,36 @@ import (
 	"github.com/sunny809/gochaos/internal/stub"
 )
 
-// Fired describes a timeline event that fired for a request.
-type Fired struct {
-	// EventIndex is the index into the loaded timeline's Events slice.
-	EventIndex int
+type (
+	// Fired describes a timeline event that fired for a request.
+	Fired struct {
+		// EventIndex is the index into the loaded timeline's Events slice.
+		EventIndex int
 
-	// RequestCount is the per-event match counter value at fire time.
-	// For time-keyed events this is still the counter of matching requests.
-	RequestCount int
+		// RequestCount is the per-event match counter value at fire time.
+		// For time-keyed events this is still the counter of matching requests.
+		RequestCount int
 
-	Fault *spec.FaultDefinition
-	Delay *spec.DelayDefinition
-}
+		Fault *spec.FaultDefinition
+		Delay *spec.DelayDefinition
+	}
 
-// eventState is the mutable runtime state for one timeline event.
-type eventState struct {
-	def       spec.TimelineEvent
-	matcher   *matcher.CompositeMatcher
-	counter   int   // number of matching requests seen
-	exhausted bool  // event will never fire again
-	fired     []int // counter values at each fire (source for Export)
-}
+	// eventState is the mutable runtime state for one timeline event.
+	eventState struct {
+		def       spec.TimelineEvent
+		matcher   *matcher.CompositeMatcher
+		counter   int   // number of matching requests seen
+		exhausted bool  // event will never fire again
+		fired     []int // counter values at each fire (source for Export)
+	}
 
-// Runner owns the loaded timeline and its per-event counters.
-type Runner struct {
-	mu     sync.RWMutex
-	name   string
-	events []*eventState
-}
+	// Runner owns the loaded timeline and its per-event counters.
+	Runner struct {
+		mu     sync.RWMutex
+		name   string
+		events []*eventState
+	}
+)
 
 // NewRunner creates an empty timeline runner.
 func NewRunner() *Runner {
@@ -197,18 +199,11 @@ func (r *Runner) Export() *spec.FaultTimeline {
 	return tl
 }
 
-// validateMatch checks that a timeline event's match pattern is non-empty and
-// that every regex-bearing criterion compiles. The stub engine's BuildMatcher
-// silently drops invalid header/cookie/query/body patterns and panics on an
-// invalid urlPathRegex (MustNewPathRegexMatcher), either of which would
-// broaden an event to fire on requests it should not match — so the timeline
-// validates them at load time, as the spec's "rejected at load" contract
-// promises.
-func validateMatch(p spec.RequestPattern) error {
-	if p.Method == "" && p.URLPath == "" && p.URLPathRegex == "" && p.Accept == "" &&
-		len(p.QueryParams) == 0 && len(p.Headers) == 0 && len(p.Cookies) == 0 && p.Body == nil {
-		return fmt.Errorf("match must set at least one criterion")
-	}
+// validateMatchRegexes checks that every regex-bearing criterion in a match
+// pattern compiles. The stub engine's BuildMatcher silently drops invalid
+// header/cookie/query/body patterns and panics on an invalid urlPathRegex, so
+// the timeline validates them at load time.
+func validateMatchRegexes(p spec.RequestPattern) error {
 	if p.URLPathRegex != "" {
 		if _, err := regexp.Compile(p.URLPathRegex); err != nil {
 			return fmt.Errorf("urlPathRegex: %w", err)
@@ -237,6 +232,100 @@ func validateMatch(p spec.RequestPattern) error {
 	return nil
 }
 
+// validateMatch checks that a timeline event's match pattern is non-empty and
+// that every regex-bearing criterion compiles.
+func validateMatch(p spec.RequestPattern) error {
+	if p.Method == "" && p.URLPath == "" && p.URLPathRegex == "" && p.Accept == "" &&
+		len(p.QueryParams) == 0 && len(p.Headers) == 0 && len(p.Cookies) == 0 && p.Body == nil {
+		return fmt.Errorf("match must set at least one criterion")
+	}
+	return validateMatchRegexes(p)
+}
+
+// validateEventAt checks the "at" trigger for one event: it must be non-nil,
+// non-negative, and set exactly one of request or timeMs.
+func validateEventAt(e spec.TimelineEvent, idx string) error {
+	if e.At == nil {
+		return fmt.Errorf("timeline: %s: at is required", idx)
+	}
+	if e.At.Request < 0 || e.At.TimeMs < 0 {
+		return fmt.Errorf("timeline: %s: at: negative triggers are invalid", idx)
+	}
+	// Exactly one key. Request > 0 means request-keyed; otherwise the
+	// event is time-keyed and TimeMs 0 is a valid key ("fire at server
+	// start", spec: TimeMs >= 0) — a request-keyed trigger's zero TimeMs
+	// is the zero value, not a second key, so only Request > 0 AND
+	// TimeMs > 0 together are ambiguous.
+	if e.At.Request > 0 && e.At.TimeMs > 0 {
+		return fmt.Errorf("timeline: %s: at must set exactly one of request or timeMs", idx)
+	}
+	return nil
+}
+
+// validateEvent checks one timeline event against the artifact rules (spec §2).
+func validateEvent(e spec.TimelineEvent, idx string) error {
+	if err := validateEventAt(e, idx); err != nil {
+		return err
+	}
+	if err := validateMatch(e.Match); err != nil {
+		return fmt.Errorf("timeline: %s: match: %w", idx, err)
+	}
+	if err := validateEventPayload(e, idx); err != nil {
+		return err
+	}
+	return validateEventUntil(e, idx)
+}
+
+// validateEventPayload checks that exactly one of fault/delay is set and
+// validates the chosen payload.
+func validateEventPayload(e spec.TimelineEvent, idx string) error {
+	if e.Fault != nil && e.Delay != nil {
+		return fmt.Errorf("timeline: %s: fault and delay are mutually exclusive", idx)
+	}
+	if e.Fault == nil && e.Delay == nil {
+		return fmt.Errorf("timeline: %s: event must set exactly one of fault or delay", idx)
+	}
+	if e.Fault != nil {
+		if e.Fault.Activation != nil {
+			return fmt.Errorf("timeline: %s: activation is not supported on timeline event faults (the event table decides when)", idx)
+		}
+		if err := response.ValidateFault(e.Fault); err != nil {
+			return fmt.Errorf("timeline: %s: %w", idx, err)
+		}
+	}
+	if e.Delay != nil {
+		if err := response.ValidateDelay(e.Delay); err != nil {
+			return fmt.Errorf("timeline: %s: %w", idx, err)
+		}
+	}
+	return nil
+}
+
+// validateEventUntil checks the "until" window constraints for one event.
+func validateEventUntil(e spec.TimelineEvent, idx string) error {
+	if e.Until == nil {
+		return nil
+	}
+	if e.Until.Request < 0 || e.Until.TimeMs < 0 {
+		return fmt.Errorf("timeline: %s: until: negative triggers are invalid", idx)
+	}
+	// Unlike at, until has no TimeMs-0 key: a window that ends at
+	// server start is meaningless, so both-zero until is not "set".
+	if (e.Until.Request > 0) == (e.Until.TimeMs > 0) {
+		return fmt.Errorf("timeline: %s: until must set exactly one of request or timeMs", idx)
+	}
+	if (e.Until.Request > 0) != (e.At.Request > 0) {
+		return fmt.Errorf("timeline: %s: until must use the same key type as at", idx)
+	}
+	if e.Until.Request > 0 && e.Until.Request <= e.At.Request {
+		return fmt.Errorf("timeline: %s: until.request must be greater than at.request (inverted window)", idx)
+	}
+	if e.Until.TimeMs > 0 && e.Until.TimeMs <= e.At.TimeMs {
+		return fmt.Errorf("timeline: %s: until.timeMs must be greater than at.timeMs (inverted window)", idx)
+	}
+	return nil
+}
+
 // Validate checks a FaultTimeline against the artifact rules (spec §2).
 func Validate(tl *spec.FaultTimeline) error {
 	if tl == nil {
@@ -246,61 +335,8 @@ func Validate(tl *spec.FaultTimeline) error {
 		return fmt.Errorf("timeline: unsupported version %d (want 1)", tl.Version)
 	}
 	for i, e := range tl.Events {
-		idx := fmt.Sprintf("events[%d]", i)
-		if e.At == nil {
-			return fmt.Errorf("timeline: %s: at is required", idx)
-		}
-		if e.At.Request < 0 || e.At.TimeMs < 0 {
-			return fmt.Errorf("timeline: %s: at: negative triggers are invalid", idx)
-		}
-		// Exactly one key. Request > 0 means request-keyed; otherwise the
-		// event is time-keyed and TimeMs 0 is a valid key ("fire at server
-		// start", spec: TimeMs >= 0) — a request-keyed trigger's zero TimeMs
-		// is the zero value, not a second key, so only Request > 0 AND
-		// TimeMs > 0 together are ambiguous.
-		if e.At.Request > 0 && e.At.TimeMs > 0 {
-			return fmt.Errorf("timeline: %s: at must set exactly one of request or timeMs", idx)
-		}
-		if err := validateMatch(e.Match); err != nil {
-			return fmt.Errorf("timeline: %s: match: %w", idx, err)
-		}
-		if e.Fault != nil && e.Delay != nil {
-			return fmt.Errorf("timeline: %s: fault and delay are mutually exclusive", idx)
-		}
-		if e.Fault == nil && e.Delay == nil {
-			return fmt.Errorf("timeline: %s: event must set exactly one of fault or delay", idx)
-		}
-		if e.Fault != nil {
-			if e.Fault.Activation != nil {
-				return fmt.Errorf("timeline: %s: activation is not supported on timeline event faults (the event table decides when)", idx)
-			}
-			if err := response.ValidateFault(e.Fault); err != nil {
-				return fmt.Errorf("timeline: %s: %w", idx, err)
-			}
-		}
-		if e.Delay != nil {
-			if err := response.ValidateDelay(e.Delay); err != nil {
-				return fmt.Errorf("timeline: %s: %w", idx, err)
-			}
-		}
-		if e.Until != nil {
-			if e.Until.Request < 0 || e.Until.TimeMs < 0 {
-				return fmt.Errorf("timeline: %s: until: negative triggers are invalid", idx)
-			}
-			// Unlike at, until has no TimeMs-0 key: a window that ends at
-			// server start is meaningless, so both-zero until is not "set".
-			if (e.Until.Request > 0) == (e.Until.TimeMs > 0) {
-				return fmt.Errorf("timeline: %s: until must set exactly one of request or timeMs", idx)
-			}
-			if (e.Until.Request > 0) != (e.At.Request > 0) {
-				return fmt.Errorf("timeline: %s: until must use the same key type as at", idx)
-			}
-			if e.Until.Request > 0 && e.Until.Request <= e.At.Request {
-				return fmt.Errorf("timeline: %s: until.request must be greater than at.request (inverted window)", idx)
-			}
-			if e.Until.TimeMs > 0 && e.Until.TimeMs <= e.At.TimeMs {
-				return fmt.Errorf("timeline: %s: until.timeMs must be greater than at.timeMs (inverted window)", idx)
-			}
+		if err := validateEvent(e, fmt.Sprintf("events[%d]", i)); err != nil {
+			return err
 		}
 	}
 	return nil

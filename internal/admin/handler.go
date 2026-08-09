@@ -89,153 +89,151 @@ func IsAdminPath(path string) bool {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
+	if h.dispatchAdminPath(path, w, r) {
+		return
+	}
+
+	writeJSON(w, http.StatusNotFound, map[string]string{
+		"error": "admin endpoint not found: " + path,
+	})
+}
+
+// dispatchAdminPath routes a recognized admin path to its handler.
+// Returns true if the path matched a known endpoint (handler was called),
+// false if the caller should respond 404.
+func (h *Handler) dispatchAdminPath(path string, w http.ResponseWriter, r *http.Request) bool {
 	switch {
 	case path == Prefix+"mappings" || path == Prefix+"mappings/":
 		switch r.Method {
 		case http.MethodGet:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
+			h.trackAdminOp()
 			h.listMappings(w, r)
 		case http.MethodPost:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
+			h.trackAdminOp()
 			h.createMapping(w, r)
 		case http.MethodDelete:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
+			h.trackAdminOp()
 			h.deleteAllMappings(w, r)
 		default:
 			methodNotAllowed(w)
 		}
-
+		return true
 	case strings.HasPrefix(path, Prefix+"mappings/"):
 		id := strings.TrimPrefix(path, Prefix+"mappings/")
 		switch r.Method {
 		case http.MethodGet:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
+			h.trackAdminOp()
 			h.getMapping(w, r, id)
 		case http.MethodDelete:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
+			h.trackAdminOp()
 			h.deleteMapping(w, r, id)
 		default:
 			methodNotAllowed(w)
 		}
+		return true
+	}
 
-	case path == Prefix+"reset":
+	return h.dispatchSingleMethodPaths(path, w, r)
+}
+
+// dispatchHealthPath routes health-check paths (no metrics tracking).
+// Returns true if the path was a health endpoint.
+func (h *Handler) dispatchHealthPath(path string, w http.ResponseWriter, r *http.Request) bool {
+	switch path {
+	case Prefix + "health", Prefix + "health/":
+		h.health(w, r)
+	case Prefix + "health/live", Prefix + "health/live/":
+		h.HealthLive(w, r)
+	case Prefix + "health/ready", Prefix + "health/ready/":
+		h.HealthReady(w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+// dispatchSingleMethodPaths routes paths that accept exactly one HTTP method
+// (or none for health checks). Returns true if the path matched.
+func (h *Handler) dispatchSingleMethodPaths(path string, w http.ResponseWriter, r *http.Request) bool {
+	if h.dispatchHealthPath(path, w, r) {
+		return true
+	}
+
+	switch path {
+	case Prefix + "reset":
 		if r.Method != http.MethodPost {
 			methodNotAllowed(w)
-			return
+			return true
 		}
-		if h.metrics != nil {
-			h.metrics.Add("admin_operations", 1)
-		}
+		h.trackAdminOp()
 		h.reset(w, r)
-
-	case path == Prefix+"nearmiss":
+	case Prefix + "nearmiss":
 		if r.Method != http.MethodPost {
 			methodNotAllowed(w)
-			return
+			return true
 		}
-		if h.metrics != nil {
-			h.metrics.Add("admin_operations", 1)
-		}
+		h.trackAdminOp()
 		h.nearMiss(w, r)
-
-	case path == Prefix+"requests":
+	case Prefix + "requests":
+		h.trackAdminOp()
 		switch r.Method {
 		case http.MethodGet:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
 			h.listRequests(w, r)
 		case http.MethodDelete:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
 			h.clearRequests(w, r)
 		default:
 			methodNotAllowed(w)
 		}
-
-	case path == Prefix+"fault-log":
+	case Prefix + "fault-log":
+		h.trackAdminOp()
 		switch r.Method {
 		case http.MethodGet:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
 			h.listFaultLog(w, r)
 		case http.MethodDelete:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
 			h.clearFaultLog(w, r)
 		default:
 			methodNotAllowed(w)
 		}
-
-	case path == Prefix+"callbacks":
+	case Prefix + "callbacks":
+		h.trackAdminOp()
 		switch r.Method {
 		case http.MethodGet:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
 			h.listCallbacks(w, r)
 		case http.MethodDelete:
-			if h.metrics != nil {
-				h.metrics.Add("admin_operations", 1)
-			}
 			h.clearCallbacks(w, r)
 		default:
 			methodNotAllowed(w)
 		}
-
-	case path == Prefix+"health" || path == Prefix+"health/":
-		h.health(w, r)
-
-	case path == Prefix+"health/live" || path == Prefix+"health/live/":
-		h.HealthLive(w, r)
-
-	case path == Prefix+"health/ready" || path == Prefix+"health/ready/":
-		h.HealthReady(w, r)
-
-	case path == Prefix+"metrics/prometheus":
+	case Prefix + "metrics/prometheus":
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
-			return
+			return true
 		}
-		if h.metrics != nil {
-			h.metrics.Add("admin_operations", 1)
-		}
+		h.trackAdminOp()
 		h.prometheusHandler(w, r)
-
-	case path == Prefix+"metrics" || path == Prefix+"metrics/":
+	case Prefix + "metrics", Prefix + "metrics/":
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
-			return
+			return true
 		}
-		if h.metrics != nil {
-			h.metrics.Add("admin_operations", 1)
-		}
+		h.trackAdminOp()
 		h.metricsHandler(w, r)
-
-	case path == Prefix+"report" || path == Prefix+"report/":
+	case Prefix + "report", Prefix + "report/":
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
-			return
+			return true
 		}
 		h.reportHandler(w, r)
-
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{
-			"error": "admin endpoint not found: " + path,
-		})
+		return false
+	}
+	return true
+}
+
+// trackAdminOp increments the admin_operations metric if metrics are enabled.
+func (h *Handler) trackAdminOp() {
+	if h.metrics != nil {
+		h.metrics.Add("admin_operations", 1)
 	}
 }
 

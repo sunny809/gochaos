@@ -149,8 +149,8 @@ func TestListFaultLog(t *testing.T) {
 	h, _, _ := setupTest()
 	// Record a fault injection event
 	h.faultLog.Record(spec.FaultInjectionEntry{
-		StubID: "stub-1",
-		FaultType: "connection_reset",
+		StubID:      "stub-1",
+		FaultType:   "connection_reset",
 		RequestPath: "/api/test",
 	})
 
@@ -164,7 +164,7 @@ func TestListFaultLog(t *testing.T) {
 
 	var result struct {
 		Entries []spec.FaultInjectionEntry `json:"entries"`
-		Count   int                            `json:"count"`
+		Count   int                        `json:"count"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode: %v", err)
@@ -183,8 +183,8 @@ func TestListFaultLog(t *testing.T) {
 func TestClearFaultLog(t *testing.T) {
 	h, _, _ := setupTest()
 	h.faultLog.Record(spec.FaultInjectionEntry{
-		StubID: "stub-1",
-		FaultType: "connection_reset",
+		StubID:      "stub-1",
+		FaultType:   "connection_reset",
 		RequestPath: "/api/test",
 	})
 
@@ -567,11 +567,11 @@ func TestCreateMappingValidFaultType(t *testing.T) {
 func TestListCallbacks(t *testing.T) {
 	h, _, _ := setupTest()
 	h.callbackLog.Record(spec.CallbackEntry{
-		StubID:       "stub-1",
-		CallbackURL:  "http://example.com/hook",
-		Status:       spec.CallbackDelivered,
-		StatusCode:   200,
-		RequestPath:  "/api/test",
+		StubID:      "stub-1",
+		CallbackURL: "http://example.com/hook",
+		Status:      spec.CallbackDelivered,
+		StatusCode:  200,
+		RequestPath: "/api/test",
 	})
 
 	req := httptest.NewRequest("GET", "/__admin/callbacks", nil)

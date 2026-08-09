@@ -20,14 +20,14 @@ type Log struct {
 }
 
 // New creates a Log with the given maximum size.
-// If max is 0 or negative, defaults to 1000.
-func New(max int) *Log {
-	if max <= 0 {
-		max = 1000
+// If size is 0 or negative, defaults to 1000.
+func New(size int) *Log {
+	if size <= 0 {
+		size = 1000
 	}
 	return &Log{
-		entries: make([]spec.CallbackEntry, max),
-		max:     max,
+		entries: make([]spec.CallbackEntry, size),
+		max:     size,
 	}
 }
 

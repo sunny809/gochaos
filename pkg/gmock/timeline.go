@@ -10,6 +10,37 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// --- record mode: stub-driven fires ---
+
+type (
+	// recordedFire is one stub-driven fault fire: the recorder counter value
+	// (1-based) at which the fault fired, and the fault definition.
+	recordedFire struct {
+		at    int
+		fault *spec.FaultDefinition
+	}
+
+	// recordedKey is the per-(method, path) state of the recorder.
+	recordedKey struct {
+		method string
+		path   string
+		count  int // matching requests observed (mirrors the runner's counter)
+		fires  []recordedFire
+	}
+
+	// timelineRecorder captures stub-driven fault fires so that ExportTimeline
+	// can serialize them into a replayable artifact (record mode). It mirrors
+	// the timeline runner's first-match-wins counter semantics: the per-key
+	// counter advances on every matching request that no timeline event
+	// consumed, and each fire is tagged with the request's observed position —
+	// the value observe returned for that request — so replay counters align
+	// exactly even under concurrency.
+	timelineRecorder struct {
+		mu   sync.Mutex
+		keys map[string]*recordedKey
+	}
+)
+
 // LoadTimelineYAML loads a fault timeline from YAML (declare or replay).
 func (s *mockServer) LoadTimelineYAML(data []byte) error {
 	var tl FaultTimeline
@@ -40,35 +71,6 @@ func (s *mockServer) ExportTimeline() (*FaultTimeline, error) {
 	tl := s.timelineRunner.Export()
 	tl.Events = append(tl.Events, s.timelineRecord.events()...)
 	return tl, nil
-}
-
-// --- record mode: stub-driven fires ---
-
-// recordedFire is one stub-driven fault fire: the recorder counter value
-// (1-based) at which the fault fired, and the fault definition.
-type recordedFire struct {
-	at    int
-	fault *spec.FaultDefinition
-}
-
-// recordedKey is the per-(method, path) state of the recorder.
-type recordedKey struct {
-	method string
-	path   string
-	count  int // matching requests observed (mirrors the runner's counter)
-	fires  []recordedFire
-}
-
-// timelineRecorder captures stub-driven fault fires so that ExportTimeline
-// can serialize them into a replayable artifact (record mode). It mirrors
-// the timeline runner's first-match-wins counter semantics: the per-key
-// counter advances on every matching request that no timeline event
-// consumed, and each fire is tagged with the request's observed position —
-// the value observe returned for that request — so replay counters align
-// exactly even under concurrency.
-type timelineRecorder struct {
-	mu   sync.Mutex
-	keys map[string]*recordedKey
 }
 
 func newTimelineRecorder() *timelineRecorder {
@@ -190,7 +192,7 @@ func deterministicFault(fault *spec.FaultDefinition) *spec.FaultDefinition {
 	if fault == nil {
 		return nil
 	}
-	copy := *fault
-	copy.Activation = nil
-	return &copy
+	faultCopy := *fault
+	faultCopy.Activation = nil
+	return &faultCopy
 }

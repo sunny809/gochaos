@@ -200,28 +200,28 @@ func TestDispatchSync_InvalidURL(t *testing.T) {
 	d := NewDispatcher(logger, log, time.Second, true)
 
 	tests := []struct {
-		name        string
-		url         string
+		name       string
+		url        string
 		wantErrSub string
 	}{
 		{
-			name:        "empty URL",
-			url:         "",
+			name:       "empty URL",
+			url:        "",
 			wantErrSub: "unsupported scheme",
 		},
 		{
-			name:        "invalid scheme",
-			url:         "ftp://example.com/callback",
+			name:       "invalid scheme",
+			url:        "ftp://example.com/callback",
 			wantErrSub: "unsupported scheme",
 		},
 		{
-			name:        "missing host",
-			url:         "http://",
+			name:       "missing host",
+			url:        "http://",
 			wantErrSub: "missing host",
 		},
 		{
-			name:        "URL with control characters",
-			url:         "http://example.com/callback\x00bad",
+			name:       "URL with control characters",
+			url:        "http://example.com/callback\x00bad",
 			wantErrSub: "invalid callback URL",
 		},
 	}
@@ -437,8 +437,8 @@ func TestDispatchSync_CallbackDelivered_PreservesExplicitContentType(t *testing.
 	d.SetSSRFBypass(true)
 
 	callback := &spec.CallbackDefinition{
-		URL:    server.URL + "/webhook",
-		Body:   `<xml>data</xml>`,
+		URL:     server.URL + "/webhook",
+		Body:    `<xml>data</xml>`,
 		Headers: map[string]string{"Content-Type": "application/xml"},
 	}
 	d.dispatchSync(callback, "stub-explicit-ct", RequestContext{})

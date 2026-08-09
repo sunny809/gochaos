@@ -2,6 +2,7 @@ package steps
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -61,7 +62,7 @@ func (tc *TestContext) AfterScenario() {
 	defer tc.mu.Unlock()
 
 	if tc.response != nil {
-		tc.response.Body.Close()
+		_ = tc.response.Body.Close()
 		tc.response = nil
 	}
 	tc.closeResponses()
@@ -87,14 +88,14 @@ func (tc *TestContext) AddStubID(id string) {
 // SendRequest sends an HTTP request to the mock server at the given path.
 func (tc *TestContext) SendRequest(method, path string) error {
 	if tc.response != nil {
-		tc.response.Body.Close()
+		_ = tc.response.Body.Close()
 		tc.response = nil
 	}
 	tc.body = nil
 
-	req, err := http.NewRequest(method, tc.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(context.Background(), method, tc.baseURL+path, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create request: %w", err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -102,10 +103,10 @@ func (tc *TestContext) SendRequest(method, path string) error {
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		resp.Body.Close()
-		return err
+		_ = resp.Body.Close()
+		return fmt.Errorf("failed to read response body: %w", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	tc.response = resp
 	// Re-wrap so Body can be read again if needed
@@ -115,12 +116,14 @@ func (tc *TestContext) SendRequest(method, path string) error {
 }
 
 // SendAdminRequest sends a request to the admin API and returns the response, body, and error.
+// The response body is read and closed internally; the returned Response has a
+// closed Body. Callers should treat respBody as the authoritative content.
 func (tc *TestContext) SendAdminRequest(method, path string, body []byte) (*http.Response, []byte, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, tc.adminURL+path, bodyReader)
+	req, err := http.NewRequestWithContext(context.Background(), method, tc.adminURL+path, bodyReader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create admin request: %w", err)
 	}
@@ -132,7 +135,7 @@ func (tc *TestContext) SendAdminRequest(method, path string, body []byte) (*http
 		return nil, nil, fmt.Errorf("admin request failed: %w", err)
 	}
 	respBody, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read admin response body: %w", err)
 	}
@@ -147,7 +150,7 @@ func (tc *TestContext) SendNRequests(n int, method, path string) error {
 	tc.mu.Unlock()
 
 	for i := 0; i < n; i++ {
-		req, err := http.NewRequest(method, tc.baseURL+path, nil)
+		req, err := http.NewRequestWithContext(context.Background(), method, tc.baseURL+path, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create request %d: %w", i+1, err)
 		}
@@ -156,16 +159,16 @@ func (tc *TestContext) SendNRequests(n int, method, path string) error {
 			// For TCP-level faults, the request may fail.
 			// Append nil to the responses list for counting.
 			tc.mu.Lock()
-			tc.responses = append(tc.responses, nil)
+			tc.responses = append(tc.responses, nil) //nolint:bodyclose // nil response, nothing to close
 			tc.mu.Unlock()
 			continue
 		}
 		// Read body to enable connection reuse
 		_, _ = io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		tc.mu.Lock()
-		tc.responses = append(tc.responses, resp)
+		tc.responses = append(tc.responses, resp) //nolint:bodyclose // body already closed above
 		tc.mu.Unlock()
 	}
 	return nil
@@ -175,21 +178,9 @@ func (tc *TestContext) SendNRequests(n int, method, path string) error {
 func (tc *TestContext) closeResponses() {
 	for _, resp := range tc.responses {
 		if resp != nil && resp.Body != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 	}
-}
-
-// registerFaultStub creates a stub at /test with the given fault configuration.
-// It applies the pending delay and activation from TestContext.
-func (tc *TestContext) registerFaultStub(faultType string) error {
-	def := tc.buildStubWithFault(faultType)
-	id := tc.server.Stub(def)
-	if id == "" {
-		return fmt.Errorf("failed to register fault stub for type %q", faultType)
-	}
-	tc.AddStubID(id)
-	return nil
 }
 
 // buildStubWithFault constructs a StubDefinition with the given fault type,

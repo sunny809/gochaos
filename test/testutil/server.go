@@ -20,29 +20,29 @@ import (
 //
 // It accepts testing.TB so both *testing.T (unit/integration) and
 // *testing.B (benchmarks) can use it.
-func StartServer(t testing.TB, opts ...gmock.Option) gmock.Server {
-	t.Helper()
+func StartServer(tb testing.TB, opts ...gmock.Option) gmock.Server {
+	tb.Helper()
 	opts = append([]gmock.Option{gmock.WithPort(0)}, opts...)
 	srv := gmock.NewServer(opts...)
 	if err := srv.Start(); err != nil {
-		t.Fatalf("start server: %v", err)
+		tb.Fatalf("start server: %v", err)
 	}
-	t.Cleanup(func() { _ = srv.Stop() })
+	tb.Cleanup(func() { _ = srv.Stop() })
 	return srv
 }
 
 // Wait polls fn every 10ms until it returns true or the timeout elapses.
 // On timeout it calls t.Fatalf with the description. Replaces time.Sleep
 // in async callback/dispatch tests with a deterministic wait.
-func Wait(t testing.TB, desc string, timeout time.Duration, fn func() bool) {
-	t.Helper()
+func Wait(tb testing.TB, desc string, timeout time.Duration, fn func() bool) {
+	tb.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
 		if fn() {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s (%v)", desc, timeout)
+			tb.Fatalf("timed out waiting for %s (%v)", desc, timeout)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

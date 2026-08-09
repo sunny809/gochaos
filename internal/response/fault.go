@@ -11,18 +11,28 @@ import (
 	"github.com/sunny809/gochaos/internal/spec"
 )
 
-// validFaultTypes defines the set of supported fault types.
-// Each key is a fault type string; the value is always true.
-// This is unexported to prevent external mutation; use ValidateFaultType() for validation.
-var validFaultTypes = map[string]bool{
-	"error":            true,
-	"empty":            true,
-	"connection_reset": true,
-	"malformed":        true,
-	"random_data":      true,
-	"slow_close":       true,
-	"rate_limit":       true,
-}
+// validFaultTypes and validDelayTypes define the supported fault and delay
+// type strings. These are unexported to prevent external mutation; use
+// ValidateFaultType() / ValidateDelay() for validation.
+var (
+	validFaultTypes = map[string]bool{
+		"error":            true,
+		"empty":            true,
+		"connection_reset": true,
+		"malformed":        true,
+		"random_data":      true,
+		"slow_close":       true,
+		"rate_limit":       true,
+	}
+
+	validDelayTypes = map[string]bool{
+		"fixed":     true,
+		"random":    true,
+		"lognormal": true,
+		"dribble":   true,
+		"timeout":   true,
+	}
+)
 
 // ValidFaultTypes returns the set of recognized fault type strings.
 // The returned map is a copy and cannot be used to modify the internal set.
@@ -73,15 +83,6 @@ func ValidateFault(fault *spec.FaultDefinition) error {
 		return err
 	}
 	return nil
-}
-
-// validDelayTypes defines the set of supported delay types.
-var validDelayTypes = map[string]bool{
-	"fixed":     true,
-	"random":    true,
-	"lognormal": true,
-	"dribble":   true,
-	"timeout":   true,
 }
 
 // ValidateDelay performs validation of a DelayDefinition, including

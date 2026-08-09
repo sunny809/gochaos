@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/sunny809/gochaos/internal/spec"
 )
@@ -20,5 +21,9 @@ func JSON(entries []spec.FaultInjectionEntry, suiteName string) ([]byte, error) 
 	if entries == nil {
 		entries = []spec.FaultInjectionEntry{}
 	}
-	return json.MarshalIndent(JSONReport{Suite: suiteName, Entries: entries}, "", "  ")
+	data, err := json.MarshalIndent(JSONReport{Suite: suiteName, Entries: entries}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON report: %w", err)
+	}
+	return data, nil
 }

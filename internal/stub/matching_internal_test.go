@@ -84,13 +84,13 @@ func TestMaxScore(t *testing.T) {
 		{
 			name: "full pattern",
 			p: spec.RequestPattern{
-				Method:         "POST",
-				URLPath:        "/api/users",
-				Accept:         "application/json",
-				Headers:        map[string]string{"Authorization": "Bearer .*"},
-				Cookies:        map[string]string{"session": ".*"},
-				QueryParams:    map[string]string{"page": "1"},
-				Body:           &spec.BodyPattern{JSONPath: "$.name"},
+				Method:      "POST",
+				URLPath:     "/api/users",
+				Accept:      "application/json",
+				Headers:     map[string]string{"Authorization": "Bearer .*"},
+				Cookies:     map[string]string{"session": ".*"},
+				QueryParams: map[string]string{"page": "1"},
+				Body:        &spec.BodyPattern{JSONPath: "$.name"},
 			},
 			want: 10 + 30 + 7 + 5 + 4 + 3 + 12, // 71
 		},
@@ -110,10 +110,10 @@ func TestMaxScore(t *testing.T) {
 
 func TestWeightedScore(t *testing.T) {
 	tests := []struct {
-		name  string
+		name   string
 		actual int
-		max   int
-		want  float64
+		max    int
+		want   float64
 	}{
 		{"zero max returns 0", 0, 0, 0},
 		{"full score", 100, 100, 1.0},
@@ -351,22 +351,22 @@ func TestMatchWithScore(t *testing.T) {
 	// Set up a registry with a few stubs.
 	r := NewRegistry()
 	if _, err := r.Add(spec.StubDefinition{
-		ID:      "stub-1",
-		Request: spec.RequestPattern{Method: "GET", URLPath: "/api/users"},
+		ID:       "stub-1",
+		Request:  spec.RequestPattern{Method: "GET", URLPath: "/api/users"},
 		Response: spec.ResponseDefinition{Status: 200},
 	}); err != nil {
 		t.Fatalf("add stub-1: %v", err)
 	}
 	if _, err := r.Add(spec.StubDefinition{
-		ID:      "stub-2",
-		Request: spec.RequestPattern{Method: "POST", URLPath: "/api/users"},
+		ID:       "stub-2",
+		Request:  spec.RequestPattern{Method: "POST", URLPath: "/api/users"},
 		Response: spec.ResponseDefinition{Status: 201},
 	}); err != nil {
 		t.Fatalf("add stub-2: %v", err)
 	}
 	if _, err := r.Add(spec.StubDefinition{
-		ID:      "stub-3",
-		Request: spec.RequestPattern{Method: "GET", URLPath: "/api/other"},
+		ID:       "stub-3",
+		Request:  spec.RequestPattern{Method: "GET", URLPath: "/api/other"},
 		Response: spec.ResponseDefinition{Status: 200},
 	}); err != nil {
 		t.Fatalf("add stub-3: %v", err)

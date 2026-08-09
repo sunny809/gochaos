@@ -7,37 +7,39 @@ import (
 	"log/slog"
 )
 
-// promMetric describes a single Prometheus metric in the registration table.
-type promMetric struct {
-	name  string // Prometheus metric name (e.g. "gochaos_requests_total")
-	help  string // HELP string
-	typ   string // "counter" or "gauge"
-	field string // Snapshot map key
-}
+type (
+	// promMetric describes a single Prometheus metric in the registration table.
+	promMetric struct {
+		name  string // Prometheus metric name (e.g. "gochaos_requests_total")
+		help  string // HELP string
+		typ   string // "counter" or "gauge"
+		field string // Snapshot map key
+	}
 
-// Metrics holds expvar counters for the gmock server.
-// All counters are concurrent-safe (expvar.Int uses atomic operations internally).
-//
-// Counters:
-//   - requests_total: Total requests received by the server
-//   - requests_matched: Requests that matched a stub
-//   - requests_unmatched: Requests that returned 404
-//   - faults_injected: Total faults injected (all types)
-//   - faults_delayed: Responses with configured delay
-//   - nearmiss_queries: Near-miss diagnostic calls
-//   - stubs_registered: Active stub count (snapshot, updated on register/delete)
-//   - admin_operations: Admin API calls (CRUD, reset, log queries)
-type Metrics struct {
-	requestsTotal    expvar.Int
-	requestsMatched  expvar.Int
-	requestsUnmatched expvar.Int
-	faultsInjected   expvar.Int
-	faultsDelayed    expvar.Int
-	nearMissQueries  expvar.Int
-	stubsRegistered  expvar.Int
-	adminOperations  expvar.Int
-	promMetrics      []promMetric // registration table for Prometheus export
-}
+	// Metrics holds expvar counters for the gmock server.
+	// All counters are concurrent-safe (expvar.Int uses atomic operations internally).
+	//
+	// Counters:
+	//   - requests_total: Total requests received by the server
+	//   - requests_matched: Requests that matched a stub
+	//   - requests_unmatched: Requests that returned 404
+	//   - faults_injected: Total faults injected (all types)
+	//   - faults_delayed: Responses with configured delay
+	//   - nearmiss_queries: Near-miss diagnostic calls
+	//   - stubs_registered: Active stub count (snapshot, updated on register/delete)
+	//   - admin_operations: Admin API calls (CRUD, reset, log queries)
+	Metrics struct {
+		requestsTotal     expvar.Int
+		requestsMatched   expvar.Int
+		requestsUnmatched expvar.Int
+		faultsInjected    expvar.Int
+		faultsDelayed     expvar.Int
+		nearMissQueries   expvar.Int
+		stubsRegistered   expvar.Int
+		adminOperations   expvar.Int
+		promMetrics       []promMetric // registration table for Prometheus export
+	}
+)
 
 // newMetrics creates and initializes all expvar counters.
 // Each counter is registered as "gmock_<name>" so they are discoverable

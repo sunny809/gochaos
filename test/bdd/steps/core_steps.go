@@ -157,5 +157,9 @@ func (tc *TestContext) iResetTheServer() error {
 // parseInt converts a string to int for step argument parsing.
 // Returns an error if the string is not a valid non-negative integer.
 func parseInt(s string) (int, error) {
-	return strconv.Atoi(s)
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer %q: %w", s, err)
+	}
+	return n, nil
 }

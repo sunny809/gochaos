@@ -82,6 +82,12 @@ linters:
       - path: internal/.*
         linters:
           - testpackage
+      - path: pkg/gmock/.*
+        linters:
+          - testpackage
+      - path: test/bdd/steps/.*
+        linters:
+          - testpackage
       # Examples
       - path: examples/
         linters:

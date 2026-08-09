@@ -1,9 +1,9 @@
+// Package steps implements godog BDD step definitions for the gochaos mock server.
 package steps
 
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -57,6 +57,7 @@ func (tc *TestContext) iRegisterStubViaAdminAPI(method, path, statusStr string) 
 	}
 
 	payload := buildStubPayload(method, path, status, "", nil, nil)
+	//nolint:bodyclose // SendAdminRequest closes the body internally
 	resp, body, err := tc.SendAdminRequest("POST", "/__admin/mappings", payload)
 	if err != nil {
 		return fmt.Errorf("admin create failed: %w", err)
@@ -91,6 +92,7 @@ func (tc *TestContext) iRegisterStubViaAdminAPIWithBody(method, path, statusStr,
 	}
 
 	payload := buildStubPayload(method, path, status, bodyStr, nil, nil)
+	//nolint:bodyclose // SendAdminRequest closes the body internally
 	resp, body, err := tc.SendAdminRequest("POST", "/__admin/mappings", payload)
 	if err != nil {
 		return fmt.Errorf("admin create failed: %w", err)
@@ -127,6 +129,7 @@ func (tc *TestContext) iRegisterStubViaAdminAPIWithFault(faultType, method, path
 		"type": faultType,
 	}
 	payload := buildStubPayload(method, path, status, "", fault, nil)
+	//nolint:bodyclose // SendAdminRequest closes the body internally
 	resp, body, err := tc.SendAdminRequest("POST", "/__admin/mappings", payload)
 	if err != nil {
 		return fmt.Errorf("admin create failed: %w", err)
@@ -154,6 +157,7 @@ func (tc *TestContext) iRegisterStubViaAdminAPIWithFault(faultType, method, path
 
 // iListAllStubs fetches all stubs via GET /__admin/mappings.
 func (tc *TestContext) iListAllStubs() error {
+	//nolint:bodyclose // SendAdminRequest closes the body internally
 	resp, body, err := tc.SendAdminRequest("GET", "/__admin/mappings", nil)
 	if err != nil {
 		return fmt.Errorf("admin list failed: %w", err)
@@ -168,6 +172,7 @@ func (tc *TestContext) iListAllStubs() error {
 
 // iGetStub fetches a specific stub via GET /__admin/mappings/{id}.
 func (tc *TestContext) iGetStub(id string) error {
+	//nolint:bodyclose // SendAdminRequest closes the body internally
 	resp, body, err := tc.SendAdminRequest("GET", "/__admin/mappings/"+id, nil)
 	if err != nil {
 		return fmt.Errorf("admin get failed: %w", err)
@@ -182,6 +187,7 @@ func (tc *TestContext) iGetStub(id string) error {
 
 // iDeleteStubViaAdmin deletes a stub via DELETE /__admin/mappings/{id}.
 func (tc *TestContext) iDeleteStubViaAdmin(id string) error {
+	//nolint:bodyclose // SendAdminRequest closes the body internally
 	resp, body, err := tc.SendAdminRequest("DELETE", "/__admin/mappings/"+id, nil)
 	if err != nil {
 		return fmt.Errorf("admin delete failed: %w", err)
@@ -200,7 +206,7 @@ func (tc *TestContext) iDeleteStubViaAdmin(id string) error {
 
 // iResetViaAdminAPI sends POST /__admin/reset.
 func (tc *TestContext) iResetViaAdminAPI() error {
-	resp, body, err := tc.SendAdminRequest("POST", "/__admin/reset", nil)
+	resp, body, err := tc.SendAdminRequest("POST", "/__admin/reset", nil) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("admin reset failed: %w", err)
 	}
@@ -218,7 +224,7 @@ func (tc *TestContext) iResetViaAdminAPI() error {
 
 // iFetchPrometheusMetrics fetches GET /__admin/metrics/prometheus.
 func (tc *TestContext) iFetchPrometheusMetrics() error {
-	resp, body, err := tc.SendAdminRequest("GET", "/__admin/metrics/prometheus", nil)
+	resp, body, err := tc.SendAdminRequest("GET", "/__admin/metrics/prometheus", nil) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("failed to fetch Prometheus metrics: %w", err)
 	}
@@ -232,7 +238,7 @@ func (tc *TestContext) iFetchPrometheusMetrics() error {
 
 // iFetchJSONMetrics fetches GET /__admin/metrics.
 func (tc *TestContext) iFetchJSONMetrics() error {
-	resp, body, err := tc.SendAdminRequest("GET", "/__admin/metrics", nil)
+	resp, body, err := tc.SendAdminRequest("GET", "/__admin/metrics", nil) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("failed to fetch JSON metrics: %w", err)
 	}
@@ -285,7 +291,7 @@ func (tc *TestContext) iQueryNearmiss(method, path string) error {
 		return fmt.Errorf("failed to marshal near-miss payload: %w", err)
 	}
 
-	resp, body, err := tc.SendAdminRequest("POST", "/__admin/nearmiss", jsonPayload)
+	resp, body, err := tc.SendAdminRequest("POST", "/__admin/nearmiss", jsonPayload) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("near-miss request failed: %w", err)
 	}
@@ -303,7 +309,7 @@ func (tc *TestContext) iQueryNearmiss(method, path string) error {
 
 // iListRequestLog fetches GET /__admin/requests.
 func (tc *TestContext) iListRequestLog() error {
-	resp, body, err := tc.SendAdminRequest("GET", "/__admin/requests", nil)
+	resp, body, err := tc.SendAdminRequest("GET", "/__admin/requests", nil) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("failed to list request log: %w", err)
 	}
@@ -317,7 +323,7 @@ func (tc *TestContext) iListRequestLog() error {
 
 // iListRequestLogWithFilter fetches GET /__admin/requests?filter={filter}.
 func (tc *TestContext) iListRequestLogWithFilter(filter string) error {
-	resp, body, err := tc.SendAdminRequest("GET", "/__admin/requests?filter="+filter, nil)
+	resp, body, err := tc.SendAdminRequest("GET", "/__admin/requests?filter="+filter, nil) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("failed to list request log: %w", err)
 	}
@@ -331,7 +337,7 @@ func (tc *TestContext) iListRequestLogWithFilter(filter string) error {
 
 // iClearRequestLog sends DELETE /__admin/requests.
 func (tc *TestContext) iClearRequestLog() error {
-	resp, body, err := tc.SendAdminRequest("DELETE", "/__admin/requests", nil)
+	resp, body, err := tc.SendAdminRequest("DELETE", "/__admin/requests", nil) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("failed to clear request log: %w", err)
 	}
@@ -349,7 +355,7 @@ func (tc *TestContext) iClearRequestLog() error {
 
 // iCheckLivenessEndpoint fetches GET /__admin/health/live.
 func (tc *TestContext) iCheckLivenessEndpoint() error {
-	resp, body, err := tc.SendAdminRequest("GET", "/__admin/health/live", nil)
+	resp, body, err := tc.SendAdminRequest("GET", "/__admin/health/live", nil) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("liveness check failed: %w", err)
 	}
@@ -363,7 +369,7 @@ func (tc *TestContext) iCheckLivenessEndpoint() error {
 
 // iCheckReadinessEndpoint fetches GET /__admin/health/ready.
 func (tc *TestContext) iCheckReadinessEndpoint() error {
-	resp, body, err := tc.SendAdminRequest("GET", "/__admin/health/ready", nil)
+	resp, body, err := tc.SendAdminRequest("GET", "/__admin/health/ready", nil) //nolint:bodyclose // SendAdminRequest reads & closes body internally
 	if err != nil {
 		return fmt.Errorf("readiness check failed: %w", err)
 	}
@@ -406,7 +412,10 @@ func (tc *TestContext) ParseAdminResponseBody(v interface{}) error {
 	if tc.body == nil {
 		return fmt.Errorf("no response body captured")
 	}
-	return json.Unmarshal(tc.body, v)
+	if err := json.Unmarshal(tc.body, v); err != nil {
+		return fmt.Errorf("failed to unmarshal admin response body: %w", err)
+	}
+	return nil
 }
 
 // ============================================================================
@@ -448,6 +457,3 @@ func getMapKeys(m map[string]interface{}) []string {
 	}
 	return keys
 }
-
-// Ensure io is used (for unused import prevention)
-var _ = io.Discard
