@@ -22,7 +22,8 @@ CLAUDE.md
 .claude/
 
 # Internal development docs (not for public repo)
-docs/
+/docs/sprints/
+/docs/templates/
 .github/README.md
 
 # Tutorial binary (built locally)
