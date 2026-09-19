@@ -1,15 +1,16 @@
-# gochaos — CI-gated Chaos Testing for Any Microservice
+<!-- # gochaos — Fault-Burst Generator for Resilience Testing -->
+# gochaos — 一个可用于在高并性能测试中主动注入故障的模拟器
 
-> **Reproduce hours of production failures in seconds.** gochaos is a fault-burst
+<!-- > **Reproduce hours of production failures in seconds.** gochaos is a fault-burst
 > generator: a real HTTP mock server that rapidly reproduces high-failure,
 > high-latency, and high-unreliability conditions so you can CI-gate your
 > service's resilience strategy (retries, circuit breakers, timeouts, fallbacks).
 >
-> Embeddable in Go tests or run as a standalone CLI/Docker image — zero JVM, ~15MB image.
+> Embeddable in Go tests or run as a standalone CLI/Docker image — zero JVM, ~15MB image. -->
 
-**Project naming**: `gochaos` is the Go module and repository name. `gmock` is the CLI binary name. The public Go package is imported as `github.com/sunny809/gochaos/pkg/gmock`.
+> **用几分钟精巧配置，即可在高压场景下重现生产级故障** gochaos 是一个轻量级的故障注入式 HTTP 模拟器：既能模拟高 TPS 下的真实 API 行为，也能按概率、按次数主动注入延迟和异常。它支持固定随机种子，确保故障在性能测试乃至 CI pipeline 中稳定复现，让服务的韧性策略（重试、熔断、超时、降级）可测试、可验证。
 
-> **中文文档**: [README_CN.md](README_CN.md)
+<!-- **Project naming**: `gochaos` is the Go module and repository name. `gmock` is the CLI binary name. The public Go package is imported as `github.com/sunny809/gochaos/pkg/gmock`. -->
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/sunny809/gochaos.svg)](https://pkg.go.dev/github.com/sunny809/gochaos)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sunny809/gochaos)](https://goreportcard.com/report/github.com/sunny809/gochaos)
@@ -20,25 +21,34 @@
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go)](https://golang.org/doc/devel/release.html)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/sunny809/gochaos/pkgs/container/gochaos)
 
-Unlike `gock` and `httpmock` which only intercept at `http.RoundTripper`, gochaos runs
+<!-- Unlike `gock` and `httpmock` which only intercept at `http.RoundTripper`, gochaos runs
 as a **real HTTP server** with **fault injection**, **chaos activation modes**,
 **seedable RNG**, **near-miss diagnostics**, and a **REST admin API** — as an
-embeddable Go library and a standalone CLI/Docker image.
+embeddable Go library and a standalone CLI/Docker image. -->
 
-## Why gmock?
+<!-- 与`gock`和`httpmock`仅拦截 `http.RoundTripper` 不同， -->
+gochaos 作为一个**真正的 HTTP 服务器**运行，具备**故障注入**、**诊断模式**以及**REST admin API**，既可以作为可嵌入的 Go 库，也可以作为独立的 CLI / Docker 镜像使用。
+在现代微服务或云原生的服务开发里面，对于单pod服务的垂直性能和可拓展性都有要求，而部分的高性能企业也期望可以达到服务的overload极限，以控制云原生HPA的等行为。在类似的实践中，工程师亟待需要一个工具可以模拟一个可以支持高并发请求的outbound服务模拟器，并在平均甚至高负载场景下可以在模拟器中注入错误或异常并监测服务影响性能是否会受影响或行为是否受预期。
 
-### vs WireMock
-WireMock faults are always-on, so you can't assert "how many faults were injected."
-gmock faults are conditional (probabilistic / Nth-request / time-window) — so we *must* log,
-and that log becomes a CI-gateable assertion.
+## Installation
 
-### vs gock / httpmock
-They intercept at `http.RoundTripper` — your SUT must use Go. gmock is a real HTTP server.
-Your SUT can be in any language, needs zero code changes.
+### CLI Binary
 
-### vs Toxiproxy
-Toxiproxy works at TCP layer and needs root privileges. gmock is a 15MB Docker image,
-works at HTTP layer — `docker run` and you're done.
+```bash
+# Install with go install
+go install github.com/sunny809/gochaos/cmd/gmock@latest
+
+# Or download a prebuilt binary from the latest release
+# https://github.com/sunny809/gochaos/releases/latest
+```
+
+### Go Library
+
+```bash
+go get github.com/sunny809/gochaos/pkg/gmock
+```
+
+Requires Go 1.22 or newer (uses the enhanced `net/http.ServeMux` pattern matching).
 
 ## Quick Start — Chaos First
 
@@ -177,40 +187,6 @@ gmock stub list --admin-url http://localhost:8080
 gmock stub create ./new-stub.json --admin-url http://localhost:8080
 gmock reset --admin-url http://localhost:8080
 ```
-
-## Installation
-
-### CLI Binary
-
-```bash
-# Install with go install
-go install github.com/sunny809/gochaos/cmd/gmock@latest
-
-# Or download a prebuilt binary from the latest release
-# https://github.com/sunny809/gochaos/releases/latest
-```
-
-### Go Library
-
-```bash
-go get github.com/sunny809/gochaos/pkg/gmock
-```
-
-Requires Go 1.22 or newer (uses the enhanced `net/http.ServeMux` pattern matching).
-
-## Key Features
-
-- **Burst-shaped faults**: Probability, Nth-request, time-window activation
-- **Reproducible**: Seedable RNG — same test run → same fault sequence
-- **Observable**: Fault-injection log with CI-gateable assertions
-- **Real HTTP server**: Not RoundTripper interception — any language SUT
-- **15MB Docker image**: No JVM, no root privileges
-
-## Architecture Highlights
-
-- ADR-004: Flat map + `sync.RWMutex` registry (not sharded — registry size is small)
-- ADR-003: Matcher returns `(bool, int)` — scoring for near-miss diagnostics
-- ADR-006: `text/template` over `html/template` (JSON escaping awareness)
 
 ## Stub File Format
 
@@ -357,22 +333,17 @@ server := gmock.NewServer(gmock.WithGzip(false))
 | `DELETE` | `/__admin/requests` | Clear request log |
 | `GET` | `/__admin/fault-log` | View fault injection log |
 | `DELETE` | `/__admin/fault-log` | Clear fault injection log |
-| `GET` | `/__admin/callbacks` | View callback dispatch events |
-| `DELETE` | `/__admin/callbacks` | Clear callback dispatch log |
 | `GET` | `/__admin/health` | Health check |
 | `GET` | `/__admin/health/live` | K8s liveness probe |
 | `GET` | `/__admin/health/ready` | K8s readiness probe |
 | `GET` | `/__admin/metrics` | Server metrics (8 counters) |
 | `POST` | `/__admin/nearmiss` | Near-miss diagnostics |
-| `GET` | `/__admin/report` | Export chaos evidence (JUnit XML or JSON) |
 
 ## Documentation
 
 | For | Document |
 |-----|----------|
 | 🚀 **Getting Started** | [Feature Overview](docs/features/getting-started.md) |
-| 🏗️ **Architecture** | [ARCHITECTURE.md](docs/ARCHITECTURE.md) — package structure, request flow, concurrency model |
-| 📋 **ADRs** | [docs/adrs/README.md](docs/adrs/README.md) — architecture decision records |
 | 📚 **Go Library API** | [docs/go-library-api.md](docs/go-library-api.md) — complete API reference |
 | 📖 **CLI Reference** | [docs/cli.md](docs/cli.md) — all commands and flags |
 | 🌐 **Admin API** | [docs/admin-api.md](docs/admin-api.md) — REST API with curl examples |
@@ -439,7 +410,7 @@ services:
 ## Features
 
 - Concurrent-safe stub registry with priority-ordered matching
-- 8-dimensional request matching (method, path exact, path regex, accept, headers, cookies, query, body)
+- 8-dimensional request matching (method, path, headers, query, body, cookies, accept)
 - Response templating with `text/template` (`{{.Request.Method}}`, `{{randomUUID}}`, `{{randomInt}}`, `{{now}}`)
 - **7 fault injection types**: `error` (500), `empty` (0-byte), `connection_reset` (TCP RST), `malformed` (invalid HTTP), `random_data` (garbage bytes + close), `slow_close` (delayed FIN), `rate_limit` (token bucket + 429/503)
 - **5 delay distributions**: `fixed`, `random`, `timeout` (infinite hang), `lognormal` (p50/p95/p99 parameterized), `dribble` (chunked body with inter-chunk delays)
