@@ -12,6 +12,7 @@ This directory contains Architecture Decision Records (ADRs) for the gmock proje
 | [ADR-004](adr-004-sharded-registry.md) | Stub Registry with Flat Map and RWMutex | Active |
 | [ADR-005](adr-005-stdlib-mux.md) | Use Go 1.22+ Standard Library Mux | Active |
 | [ADR-006](adr-006-text-template.md) | Response Templating | Active |
+| [ADR-007](adr-007-stay-on-go-no-jvm-rewrite.md) | Stay on Go — No JVM Rewrite | Active |
 
 ## What is an ADR?
 
