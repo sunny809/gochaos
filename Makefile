@@ -1,6 +1,6 @@
 .PHONY: build test test-race test-unit test-integration test-all vet lint lint-all audit vulncheck coverage ci clean install help
 
-BINARY := gochaos
+BINARY := gmock
 MODULE := github.com/sunny809/gochaos
 GO     := go
 
