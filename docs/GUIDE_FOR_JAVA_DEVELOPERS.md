@@ -1086,6 +1086,7 @@ func (w *HTTPWriter) writeDribbleBody(rw http.ResponseWriter, resp spec.Response
     
     interval := time.Duration(cfg.totalDuration) / time.Duration(cfg.chunks)
     body := w.renderBody(resp, req, stubID)
+    chunkLen := len(body) / cfg.chunks   // config fields are chunks + totalDuration
     
     for i := 0; i < cfg.chunks; i++ {
         // Check if client has disconnected.
@@ -1094,8 +1095,8 @@ func (w *HTTPWriter) writeDribbleBody(rw http.ResponseWriter, resp spec.Response
         }
         
         // Write one chunk.
-        start := i * chunkSize
-        end := min(start+chunkSize, len(body))
+        start := i * chunkLen
+        end := min(start+chunkLen, len(body))
         if _, err := rw.Write([]byte(body[start:end])); err != nil {
             return err
         }

@@ -10,7 +10,7 @@ Without near-miss diagnostics, an unmatched request returns a dead-end:
 
 ```json
 {
-  "error": "no stub matched",
+  "error": "no matching stub",
   "method": "GET",
   "path": "/api/users/42"
 }
@@ -26,10 +26,35 @@ Headers? Body? Near-miss answers those questions.
 When a request arrives and no stub has a perfect match, the near-miss engine:
 
 1. Compares the request against **every registered stub**
-2. For each stub, scores all 8 matching dimensions (method, path, headers, query, body, cookies, accept, priority)
-3. Returns the top-N **near misses** — stubs that came closest to matching
+2. For each stub, scores each **configured** matching dimension and sums the results
+3. Returns the top-N **near misses** (default top-N: 5) — stubs that came closest, best first
 
-Each near miss shows a **per-dimension breakdown** of what matched and what didn't.
+Each near miss shows a `topMissReason` (the single most useful fix) plus, via the
+admin endpoint, a **per-dimension breakdown** of what matched and what didn't.
+
+### How Scoring Works
+
+Each stub's maximum score is the **sum of the weights of the dimensions it
+configures** — it is not a fixed total. A stub that defines only `method` + `urlPath`
+scores out of 10 + 30 = 40; a full-pattern stub scores out of more.
+
+| Dimension | Max score | Notes |
+|-----------|-----------|-------|
+| `urlPath` (exact) | 30 | Exact path match |
+| `urlPathRegex` | 30 | Regex path match, as a path matcher |
+| `method` | 10 | HTTP method |
+| body (JSONPath) | 20 | JSONPath body match |
+| body (regex) | 12 | `regexMatch` |
+| body (exact) | 10 | `exactMatch` |
+| `accept` | 7 | Media-type negotiation |
+| `headers` | 5 | Header name → pattern |
+| `cookies` | 4 | Cookie name → pattern |
+| `queryParams` | 3 | Query param → pattern |
+| `priority` | — | Tie-break only, not scored |
+
+> Only dimensions the stub actually configures are scored (and only the ones with
+> matchers contribute). `maxScore` in the output is that stub's per-dimension maxes
+> summed — so a method+path stub reports `maxScore: 40`, not a blanket 8.
 
 ---
 
@@ -51,45 +76,38 @@ curl -v http://localhost:8080/api/users
 
 ```json
 {
-  "error": "no stub matched",
+  "error": "no matching stub",
   "method": "GET",
   "path": "/api/users",
   "nearMisses": [
     {
       "stubId": "abc-123",
-      "name": "",
-      "priority": 0,
-      "scoreBreakdown": {
-        "method": {"score": 1, "maxScore": 1, "matched": true},
-        "path":   {"score": 0, "maxScore": 1, "matched": false, "expected": "/api/user", "actual": "/api/users"},
-        "headers":{"score": 1, "maxScore": 1, "matched": true},
-        "query":  {"score": 1, "maxScore": 1, "matched": true},
-        "body":   {"score": 1, "maxScore": 1, "matched": true},
-        "cookies":{"score": 1, "maxScore": 1, "matched": true},
-        "accept": {"score": 1, "maxScore": 1, "matched": true}
-      },
-      "totalScore": 6,
-      "maxPossibleScore": 7
+      "stubName": "",
+      "score": 10,
+      "maxScore": 40,
+      "topMissReason": "path /api/users does not equal /api/user"
     }
   ]
 }
 ```
 
-**Reading the breakdown**: The stub `/api/user` scored 6/7 — the **path** dimension
-mismatched (`/api/users` vs `/api/user`). That's your debugging hint.
+**Reading it**: the stub `/api/user` scored 10/40 — the **path** dimension mismatched
+(`/api/users` vs `/api/user`). `topMissReason` states the one fix. The 404 payload is
+deliberately slim: for the full per-dimension breakdown, call `POST /__admin/nearmiss`.
 
 ---
 
 ## Near-Miss Admin API
 
-For programmatic access, use the dedicated endpoint:
+For programmatic access, use the dedicated endpoint — it returns the **full
+per-dimension breakdown** the 404 payload omits:
 
 ```
 POST /__admin/nearmiss
 ```
 
-Submit a request body; the engine compares it against all registered stubs and returns
-the near-miss breakdown without actually processing the request.
+Submit a request; the engine compares it against all registered stubs without
+processing the request itself.
 
 ### cURL Example
 
@@ -108,17 +126,20 @@ curl -X POST http://localhost:8080/__admin/nearmiss \
 
 ```json
 {
+  "meta": { "topN": 5, "total": 1 },
   "nearMisses": [
     {
       "stubId": "abc-123",
-      "name": "get-user-v1",
-      "scoreBreakdown": {
-        "method":  {"score": 1, "maxScore": 1, "matched": true},
-        "path":    {"score": 0, "maxScore": 1, "matched": false},
-        "headers": {"score": 1, "maxScore": 1, "matched": true}
-      },
-      "totalScore": 6,
-      "maxPossibleScore": 7
+      "stubName": "get-user-v1",
+      "score": 18,
+      "maxScore": 45,
+      "reason": "",
+      "breakdown": [
+        { "dimension": "method", "matched": true,  "score": 10, "maxScore": 10, "expected": "GET", "actual": "GET" },
+        { "dimension": "path",   "matched": false, "score": 0,  "maxScore": 30, "expected": "/api/user", "actual": "/api/users", "reason": "path /api/users does not equal /api/user" },
+        { "dimension": "accept", "matched": true,  "score": 7,  "maxScore": 7,  "expected": "application/json", "actual": "application/json" },
+        { "dimension": "headers","matched": true,  "score": 1,  "maxScore": 5 }
+      ]
     }
   ]
 }
@@ -127,22 +148,25 @@ curl -X POST http://localhost:8080/__admin/nearmiss \
 ### Go Library API
 
 ```go
-result, err := server.ComputeNearMiss(gmock.RequestPattern{
-    Method:  "GET",
-    URLPath: "/api/users",
-})
-if err != nil {
-    t.Fatal(err)
-}
-for _, nm := range result.NearMisses {
-    fmt.Printf("Stub %s scored %d/%d\n", nm.StubID, nm.TotalScore, nm.MaxPossibleScore)
-    for dim, breakdown := range nm.ScoreBreakdown {
-        if !breakdown.Matched {
-            fmt.Printf("  %s: expected=%q, actual=%q\n", dim, breakdown.Expected, breakdown.Actual)
+results := server.NearMiss("GET", "/api/users", map[string]string{
+    "Accept": "application/json",
+}, "")
+
+for _, nm := range results {
+    fmt.Printf("Stub %s scored %d/%d: %s\n", nm.StubID, nm.Score, nm.MaxScore, nm.Reason)
+    for _, d := range nm.Breakdown {
+        if !d.Matched {
+            fmt.Printf("  %s: expected=%q actual=%q\n", d.Dimension, d.Expected, d.Actual)
         }
     }
 }
 ```
+
+> `NearMissResult` fields: `StubID`, `StubName`, `Score`, `MaxScore`, `Breakdown`
+> (`[]DimensionScore`: `Dimension`, `Matched`, `Score`, `MaxScore`, `Expected`,
+> `Actual`, `Reason`) and `Reason`. The full result is only returned from the admin
+> endpoint and `NearMiss` library call; the 404 payload carries the slim
+> `stubId/stubName/score/maxScore/topMissReason` projection.
 
 ---
 
@@ -157,29 +181,27 @@ for _, nm := range result.NearMisses {
 
 ---
 
-## Near-Miss Response Reference
+## Responsive Reference
 
-### ScoreBreakdown
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `score` | int | Actual score for this dimension (0 or 1) |
-| `maxScore` | int | Maximum possible score (always 1 for current matchers) |
-| `matched` | bool | Whether this dimension matched |
-| `expected` | string | *(included when not matched)* What the stub expected |
-| `actual` | string | *(included when not matched)* What the request provided |
-
-### NearMissEntry
+### 404 near-miss entry
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `stubId` | string | UUID of the near-miss stub |
-| `name` | string | Optional human-readable name |
-| `priority` | int | Stub priority (lower = higher) |
-| `scoreBreakdown` | object | Per-dimension breakdown (see above) |
-| `totalScore` | int | Sum of all dimension scores |
-| `maxPossibleScore` | int | Maximum possible total (8 dimensions) |
-| `matchingRatio` | float | `totalScore / maxPossibleScore` |
+| `stubId` | string | ID of the near-miss stub |
+| `stubName` | string | Optional human-readable name (omitted when empty) |
+| `score` | int | Sum of matched-dimension scores for this stub |
+| `maxScore` | int | Max possible for this stub's configured dimensions |
+| `topMissReason` | string | The single most useful mismatch, human-readable |
+
+### Admin endpoint near-miss entry
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stubId` / `stubName` | string | Stub identification |
+| `score` / `maxScore` | int | As above |
+| `breakdown` | array | Per-dimension `DimensionScore` objects (dimension, matched, score, maxScore, expected, actual, reason) |
+| `reason` | string | Empty unless a dimension-level reason applies |
+| `meta.topN` / `meta.total` | int | Configured limit and total candidates scanned |
 
 ---
 
@@ -190,12 +212,15 @@ for _, nm := range result.NearMisses {
    For very large registries, consider narrowing the stub set.
 3. **Body matching** → Request bodies are read during near-miss. For large bodies,
    the engine captures up to the first 64KB.
-4. **Only dimensions with matchers are scored** → If a stub only defines method + path,
-   only those 2 dimensions affect the score (maxPossibleScore = 2).
+4. **Only dimensions the stub configures are scored** → A stub defining only method +
+   path scores out of 40, not 8 — `maxScore` reflects what that stub actually checks.
+5. **`topMissReason` ≠ fix guarantee** → It names the closest mismatch, which is
+   usually the fix, but a request may be near several stubs at once.
 
 ---
 
 ## Full Example
 
-See [examples/nearmiss/](../examples/nearmiss/main_test.go) for a complete, runnable
-example demonstrating near-miss debugging and programmatic access.
+See [examples/verification/](../examples/verification/) for a runnable example that
+uses the verification and near-miss APIs together, and
+[stub-matching.md](stub-matching.md) for the full matcher reference.

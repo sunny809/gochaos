@@ -138,21 +138,27 @@ server.Stub(gmock.StubDefinition{
         Status: http.StatusOK,
         Body:   "This is a slow response that arrives in chunks",
         Delay: &gmock.DelayDefinition{
-            Type:     "dribble",
-            ChunkSize: 10,   // bytes per chunk
-            Interval:  200,  // milliseconds between chunks
+            Type:          "dribble",
+            Chunks:        5,   // number of chunks to split the body into
+            TotalDuration: 800, // total time to stream the body, in milliseconds
         },
     },
 })
 ```
 
-**Expected behaviour**: Each 10-byte chunk arrives 200ms apart. For a 50-byte body:
+**Expected behaviour**: The body is split into 5 equal chunks and the total
+duration (800ms) is spread evenly between them. For a 50-byte body:
 - 0ms: first 10 bytes
 - 200ms: next 10 bytes
 - 400ms: next 10 bytes
 - 600ms: next 10 bytes
 - 800ms: final 10 bytes
 - Total time: ~800ms
+
+> **Note**: dribble only delays when the response **body is non-empty**. With an
+> empty body the writer short-circuits and no chunk delay is applied — give the
+> stub a body (or use `fixed`/`random` if you need a delay before an empty
+> response).
 
 ---
 
@@ -194,8 +200,8 @@ This simulates a slow fail — the client waits, then gets a 500 error.
 | `p50` | int | for `lognormal` | Median latency in milliseconds |
 | `p95` | int | for `lognormal` | 95th percentile latency in milliseconds |
 | `p99` | int | for `lognormal` | 99th percentile latency in milliseconds |
-| `chunkSize` | int | for `dribble` | Bytes per chunk |
-| `interval` | int | for `dribble` | Milliseconds between chunks |
+| `chunks` | int | for `dribble` | Number of equal chunks to split the body into |
+| `totalDuration` | int | for `dribble` | Total duration of the stream, milliseconds |
 
 ---
 
@@ -256,7 +262,7 @@ curl -X POST http://localhost:8080/__admin/mappings \
 | Variable network | `random` (50-200ms) | Jitter tolerance, request coalescing |
 | Realistic tail latency | `lognormal` (p50=10, p95=200, p99=1000) | Circuit breaker thresholds |
 | Hanging connection | `timeout` | Client-side timeout handling, goroutine leaks |
-| Slow stream | `dribble` (chunk=64, interval=100) | Streaming clients, progress indicators |
+| Slow stream | `dribble` (chunks=8, totalDuration=1000) | Streaming clients, progress indicators |
 | Slow failure | `fixed` delay + `error` fault | Timeout + error handling together |
 
 ## Full Example

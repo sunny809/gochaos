@@ -251,10 +251,12 @@ services:
       - ../../dashboards:/var/lib/grafana/dashboards:ro
 ```
 
-Start with:
+Get the stack from that repository (the compose file, `prometheus.yml`, and
+Grafana provisioning live there, not in this repo), then start it:
 
 ```bash
-cd examples/docker-compose
+git clone https://github.com/sunny809/prometheus.git gmock-observability
+cd gmock-observability
 docker compose up -d
 ```
 

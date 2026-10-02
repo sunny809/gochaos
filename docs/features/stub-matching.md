@@ -58,10 +58,12 @@ server.Stub(gmock.StubDefinition{
 ## Matching Algorithm
 
 1. Iterate all stubs in priority order (lower priority value first)
-2. For each stub, score all 8 dimensions
-3. Sum the dimension scores (each dimension contributes 1 if matched, 0 if not)
-4. The stub with the highest total score wins
-5. If no stub scores > 0, return 404
+2. For each stub, score the dimensions it configures; each matched dimension
+   contributes its **weight** (e.g. `urlPath` 30, `method` 10, `headers` 5) —
+   see [Near-Miss Diagnostics](near-miss-diagnostics.md) for the weight table
+3. Sum the dimension scores
+4. The stub with the highest total score wins; ties break by priority
+5. If no stub score > 0, return 404
 
 ## Unmatched Requests
 
@@ -69,10 +71,12 @@ When no stub matches, the server returns:
 
 ```json
 {
-  "error": "no stub matched",
+  "error": "no matching stub",
   "method": "GET",
   "path": "/api/unknown",
-  "query": "page=1"
+  "nearMisses": [
+    { "stubId": "...", "stubName": "...", "score": 10, "maxScore": 40, "topMissReason": "path /api/unknown does not equal ..." }
+  ]
 }
 ```
 

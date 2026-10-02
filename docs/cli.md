@@ -122,7 +122,8 @@ gmock stub list
 gmock stub list --admin-url http://localhost:9090
 ```
 
-**Output**: Pretty-printed JSON array of all stubs.
+**Output**: Pretty-printed JSON object — `{"mappings": [ ... ]}` with a
+`meta.total` count — listing all stubs.
 
 #### `gmock stub create <file>`
 

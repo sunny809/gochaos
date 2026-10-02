@@ -31,7 +31,7 @@ Check if the server is running and get basic statistics.
 {
   "status": "ok",
   "stubCount": 5,
-  "requestCount": 42
+  "timestamp": "2026-10-02T14:11:23Z"
 }
 ```
 
@@ -443,20 +443,26 @@ Returns logged requests in chronological order (oldest first).
 **Response** `200 OK`:
 
 ```json
-[
-  {
-    "method": "GET",
-    "path": "/api/users",
-    "queryString": "",
-    "headers": {
-      "Accept": ["*/*"],
-      "User-Agent": ["curl/8.0.0"]
-    },
-    "body": "",
-    "receivedAt": "2026-06-13T12:00:00Z"
-  }
-]
+{
+  "meta": { "total": 22 },
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/users",
+      "queryString": "",
+      "headers": {
+        "Accept": ["*/*"],
+        "User-Agent": ["curl/8.0.0"]
+      },
+      "body": "",
+      "receivedAt": "2026-06-13T12:00:00Z"
+    }
+  ]
+}
 ```
+
+The response is an object with a `requests` array (plus a `meta.total` count), not a
+bare array.
 
 **Examples**:
 
@@ -515,17 +521,18 @@ all registered stubs and returns a per-dimension breakdown for the top near miss
 
 ```json
 {
+  "meta": { "topN": 5, "total": 1 },
   "nearMisses": [
     {
       "stubId": "abc-123",
-      "name": "get-user",
-      "scoreBreakdown": {
-        "method":  {"score": 1, "maxScore": 1, "matched": true},
-        "path":    {"score": 0, "maxScore": 1, "matched": false},
-        "headers": {"score": 1, "maxScore": 1, "matched": true}
-      },
-      "totalScore": 6,
-      "maxPossibleScore": 7
+      "stubName": "get-user",
+      "score": 18,
+      "maxScore": 45,
+      "reason": "",
+      "breakdown": [
+        { "dimension": "method",  "matched": true, "score": 10, "maxScore": 10, "expected": "GET", "actual": "GET" },
+        { "dimension": "path",    "matched": false,"score": 0,  "maxScore": 30, "expected": "/api/user", "actual": "/api/users" }
+      ]
     }
   ]
 }
@@ -535,12 +542,12 @@ all registered stubs and returns a per-dimension breakdown for the top near miss
 
 | Field | Description |
 |-------|-------------|
+| `meta.topN` / `meta.total` | Configured near-miss limit, and total candidates scanned |
 | `nearMisses` | Array of near-miss results, sorted by match quality (best first) |
-| `stubId` | UUID of the near-missing stub |
-| `name` | Human-readable name of the near-missing stub |
-| `scoreBreakdown` | Per-dimension match scores: `method`, `path`, `headers`, `query`, `body`, `cookies` |
-| `totalScore` | Total matched dimensions for this stub |
-| `maxPossibleScore` | Maximum possible score for this stub |
+| `stubId` / `stubName` | Stub identification |
+| `score` / `maxScore` | This stub's matched score and its configured-dimensions maximum (weights: `urlPath` 30, `method` 10, body 10–20, `accept` 7, `headers` 5, `cookies` 4, `queryParams` 3) |
+| `breakdown` | Per-dimension `DimensionScore` objects: `dimension`, `matched`, `score`, `maxScore`, `expected`, `actual`, `reason` |
+| `reason` | Optional human-readable summary |
 
 **Example**:
 
@@ -769,8 +776,8 @@ The following fields are available for matching incoming requests:
 | `body` | string | Response body string. |
 | `base64Body` | string | Base64-encoded binary body (takes precedence over `body`). |
 | `transformResponse` | bool | Enable template rendering (see Response Templating docs). |
-| `fault.type` | string | `"error"`, `"empty"`, or `"connection_reset"`. |
-| `delay.type` | string | `"fixed"` or `"random"`. |
+| `fault.type` | string | One of `error`, `empty`, `connection_reset`, `malformed`, `random_data`, `slow_close`, `rate_limit`. |
+| `delay.type` | string | One of `fixed`, `random`, `lognormal`, `dribble`, `timeout`. |
 | `delay.value` | int | Fixed delay in milliseconds. |
 | `delay.min` | int | Minimum random delay in milliseconds. |
 | `delay.max` | int | Maximum random delay in milliseconds. |

@@ -35,7 +35,7 @@ resp, _ := http.Get(server.URL() + "/api/hello")
 ### NewServer
 
 ```go
-func NewServer(opts ...Option) *Server
+func NewServer(opts ...Option) Server
 ```
 
 Creates a new mock server instance. The server is not started until `.Start()` is called.
@@ -55,19 +55,11 @@ After starting, `s.URL()` returns the base URL.
 #### Stop
 
 ```go
-func (s *Server) Stop()
+func (s *Server) Stop() error
 ```
 
-Stops the server gracefully. Equivalent to `Shutdown()` with the default timeout.
-
-#### Shutdown
-
-```go
-func (s *Server) Shutdown() error
-```
-
-Shuts down the server with the configured shutdown timeout (default 30s).
-In-flight requests are given time to complete before force-close.
+Stops the server gracefully. In-flight requests are given up to the configured
+`WithShutdownTimeout` (default 30s) to complete before connections are force-closed.
 
 #### URL
 
@@ -81,23 +73,25 @@ Panics if called before `Start()`.
 #### Stub
 
 ```go
-func (s *Server) Stub(def StubDefinition) (string, error)
+func (s *Server) Stub(def StubDefinition) string
 ```
 
-Registers a stub definition. Returns the stub's UUID and any validation error.
+Registers a stub definition and returns its UUID. If validation fails the
+error is logged and an empty string is returned — use `StubJSON` if you need
+the validation error itself.
 
-#### RemoveStub
+#### DeleteStub
 
 ```go
-func (s *Server) RemoveStub(id string) error
+func (s *Server) DeleteStub(id string) bool
 ```
 
-Removes a registered stub by UUID. Returns an error if the stub doesn't exist.
+Removes a registered stub by UUID. Returns `true` if a stub was removed.
 
-#### RemoveAllStubs
+#### ClearStubs
 
 ```go
-func (s *Server) RemoveAllStubs()
+func (s *Server) ClearStubs()
 ```
 
 Removes all registered stubs.
@@ -428,8 +422,8 @@ server := gmock.NewServer(
 
 | Category | Functions/Methods |
 |----------|------------------|
-| **Server lifecycle** | `NewServer`, `Start`, `Stop`, `Shutdown`, `URL` |
-| **Stub management** | `Stub`, `RemoveStub`, `RemoveAllStubs`, `Reset` |
+| **Server lifecycle** | `NewServer`, `Start`, `Stop`, `URL` |
+| **Stub management** | `Stub`, `StubJSON`, `DeleteStub`, `ClearStubs`, `Reset` |
 | **Request log** | `RequestLog`, `UnmatchedRequests`, `ClearRequestLog` |
 | **Verification** | `Verify`, `VerifyNotCalled`, `VerifyFaultsInjected` |
 | **Fault log** | `FaultLog`, `ClearFaultLog` |

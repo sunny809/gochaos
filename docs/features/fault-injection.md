@@ -159,12 +159,10 @@ server.Stub(gmock.StubDefinition{
     },
     Response: gmock.ResponseDefinition{
         Fault: &gmock.FaultDefinition{
-            Type: "rate_limit",
-            Config: map[string]any{
-                "capacity": 5,      // burst capacity
-                "refillRate": 1,    // tokens per second
-                "refillInterval": 1, // seconds between refills
-            },
+            Type:           "rate_limit",
+            AfterRequests:  0,  // allow this many requests before limiting
+            PerSecond:      1,  // token-bucket refill rate (per second)
+            RateLimitStatus: 429,
         },
     },
 })
@@ -280,11 +278,11 @@ server.Stub(gmock.StubDefinition{
 |------|---------------|:------------------:|
 | `error` | — | ❌ |
 | `empty` | — | ❌ |
-| `connection_reset` | — | ✅ (fallback to 500) |
-| `malformed` | — | ✅ (fallback to 200) |
-| `random_data` | `size` (int, default 1024) | ✅ (fallback to 200) |
-| `slow_close` | — | ✅ (fallback to 200) |
-| `rate_limit` | `capacity`, `refillRate`, `refillInterval` | ❌ |
+| `connection_reset` | — | ✅ (fallback: 500 JSON error body) |
+| `malformed` | — | ✅ (fallback: truncated 200 response) |
+| `random_data` | `dataLength` (int, default 256) | ✅ (fallback: 500 + random hex body) |
+| `slow_close` | `delayMs` (int, default 1000) | ✅ (response written normally, then delayed FIN) |
+| `rate_limit` | `afterRequests`, `perSecond`, `rateLimitStatus` | ❌ |
 
 ---
 
@@ -299,7 +297,7 @@ curl -X POST http://localhost:8080/__admin/mappings \
 # Rate limit fault with config
 curl -X POST http://localhost:8080/__admin/mappings \
   -H 'Content-Type: application/json' \
-  -d '{"request":{"method":"GET","urlPath":"/api/limited"},"response":{"fault":{"type":"rate_limit","config":{"capacity":3,"refillRate":1,"refillInterval":1}}}}'
+  -d '{"request":{"method":"GET","urlPath":"/api/limited"},"response":{"fault":{"type":"rate_limit","perSecond":1,"afterRequests":3,"rateLimitStatus":429}}}'
 
 # Probabilistic connection reset
 curl -X POST http://localhost:8080/__admin/mappings \
@@ -327,10 +325,9 @@ curl -X POST http://localhost:8080/__admin/mappings \
     body: '{"ok":true}'
     fault:
       type: rate_limit
-      config:
-        capacity: 5
-        refillRate: 1
-        refillInterval: 1
+      perSecond: 1        # token-bucket refill rate (per second)
+      afterRequests: 5    # warm-up: allow this many requests before limiting
+      rateLimitStatus: 429
 
 - name: delayed-error
   request:
